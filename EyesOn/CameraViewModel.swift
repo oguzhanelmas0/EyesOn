@@ -11,10 +11,12 @@ final class CameraViewModel: ObservableObject {
     @Published var cameraState: CameraState = .loading
     @Published var faceObservations: [VNFaceObservation] = []
     @Published var frameSize: CGSize = .zero
+    @Published var gazeDirection: GazeDirection?
 
     private let manager = CameraManager()
     private let visionProcessor = VisionProcessor()
     private var processingTask: Task<Void, Never>?
+    private var smoother = GazeSmoother(size: 6)
 
     var captureSession: AVCaptureSession { manager.captureSession }
 
@@ -62,12 +64,16 @@ final class CameraViewModel: ObservableObject {
                 guard !Task.isCancelled else { break }
                 guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { continue }
 
-                // Suspends main actor → Vision actor processes on background thread
                 let result = await processor.process(pixelBuffer: pixelBuffer)
 
-                // Resume on main actor to publish results
                 faceObservations = result.observations
                 frameSize        = result.imageSize
+                if let raw = result.observations.first.flatMap({ GazeEstimator.estimate(from: $0) }) {
+                    gazeDirection = smoother.add(raw)
+                } else {
+                    smoother.reset()
+                    gazeDirection = nil
+                }
             }
         }
     }

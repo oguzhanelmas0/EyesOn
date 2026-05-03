@@ -28,15 +28,22 @@ struct ContentView: View {
 
     @ViewBuilder
     private var cameraWithOverlay: some View {
-        ZStack {
-            CameraPreviewView(session: viewModel.captureSession)
-                .ignoresSafeArea()
+        ZStack(alignment: .bottomTrailing) {
+            // Camera feed + landmark overlay
+            ZStack {
+                CameraPreviewView(session: viewModel.captureSession)
+                    .ignoresSafeArea()
 
-            FaceOverlayView(
-                observations: viewModel.faceObservations,
-                frameSize: viewModel.frameSize
-            )
-            .ignoresSafeArea()
+                FaceOverlayView(
+                    observations: viewModel.faceObservations,
+                    frameSize: viewModel.frameSize
+                )
+                .ignoresSafeArea()
+            }
+
+            // Gaze direction HUD (bottom-right corner)
+            GazeDirectionView(direction: viewModel.gazeDirection)
+                .padding(16)
         }
     }
 
