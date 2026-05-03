@@ -11,18 +11,18 @@ final class CameraViewModel: ObservableObject {
         case loading, running, denied, unavailable
     }
 
-    @Published var cameraState: CameraState             = .loading
-    @Published var faceObservations: [VNFaceObservation] = []
-    @Published var frameSize: CGSize                    = .zero
+    @Published var cameraState: CameraState              = .loading
+    @Published var faceObservations: [VNFaceObservation]  = []
+    @Published var frameSize: CGSize                     = .zero
     @Published var gazeDirection: GazeDirection?
     @Published var processedFrame: NSImage?
-    @Published var correctionEnabled: Bool              = true
+    @Published var correctionEnabled: Bool               = true
     @Published var validationResult: LandmarkValidationResult?
 
-    private let manager         = CameraManager()
-    private let visionProcessor = VisionProcessor()
+    private let manager          = CameraManager()
+    private let visionProcessor  = VisionProcessor()
     private var processingTask: Task<Void, Never>?
-    private var smoother        = GazeSmoother(size: 6)
+    private var directionSmoother = GazeSmoother(size: 6)
 
     private let ciContext: CIContext = {
         if let device = MTLCreateSystemDefaultDevice() { return CIContext(mtlDevice: device) }
@@ -31,7 +31,6 @@ final class CameraViewModel: ObservableObject {
 
     var captureSession: AVCaptureSession { manager.captureSession }
 
-    /// Correction is active only when: enabled + landmarks safe + gaze off-centre
     var isCorrecting: Bool {
         correctionEnabled
             && (validationResult?.isSafe == true)
@@ -86,46 +85,51 @@ final class CameraViewModel: ObservableObject {
                 guard !Task.isCancelled else { break }
                 guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { continue }
 
-                // 1. Vision — runs on VisionProcessor actor (background)
+                // 1. Vision — background thread via actor
                 let result = await processor.process(pixelBuffer: pixelBuffer)
 
                 // 2. Landmark validation — gates all correction
                 let validation = result.observations.first.map { LandmarkValidator.validate($0) }
 
-                // 3. Gaze estimation (only when landmarks are safe)
-                let rawGaze = (validation?.isSafe == true)
-                    ? result.observations.first.flatMap { GazeEstimator.estimate(from: $0) }
-                    : nil
-
-                let gaze: GazeDirection?
-                if let raw = rawGaze {
-                    gaze = smoother.add(raw)
+                // 3. Gaze estimate — continuous offset + discrete direction
+                let gazeEstimate: GazeEstimate?
+                if validation?.isSafe == true {
+                    gazeEstimate = result.observations.first.flatMap { GazeEstimator.estimate(from: $0) }
                 } else {
-                    smoother.reset()
-                    gaze = nil
+                    gazeEstimate = nil
                 }
 
-                // 4. Eye correction — gated by validation + enabled flag
+                // 4. Smooth discrete direction for UI display
+                let smoothedDirection: GazeDirection?
+                if let est = gazeEstimate {
+                    smoothedDirection = directionSmoother.add(est.direction)
+                } else {
+                    directionSmoother.reset()
+                    smoothedDirection = nil
+                }
+
+                // 5. Eye correction — uses continuous rawOffset for proportional shift
                 var displayCI = result.ciImage
                 if correctionEnabled,
                    let obs   = result.observations.first,
                    let valid = validation,
-                   let g     = gaze, g != .center {
+                   let est   = gazeEstimate,
+                   est.direction != .center {
                     displayCI = EyeCorrectionProcessor.correct(
                         image: displayCI,
                         observation: obs,
-                        gaze: g,
+                        gazeEstimate: est,
                         validation: valid
                     )
                 }
 
-                // 5. Render CIImage → NSImage (Metal GPU)
+                // 6. Render → NSImage
                 let nsImage = render(displayCI, context: ctx)
 
-                // 6. Publish (we are already on @MainActor via Task inheritance)
+                // 7. Publish
                 faceObservations = result.observations
                 frameSize        = result.imageSize
-                gazeDirection    = gaze
+                gazeDirection    = smoothedDirection
                 validationResult = validation
                 processedFrame   = nsImage
             }
