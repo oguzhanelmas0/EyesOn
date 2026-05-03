@@ -38,6 +38,18 @@ enum GazeDirection: Equatable {
         case .down:   CGPoint(x:  0.0, y:  1.0)
         }
     }
+
+    // Pixel shift direction for eye correction (CIImage coords: x+ right, y+ up)
+    // Correction is opposite to gaze: pupil right → shift content left, etc.
+    var correctionShift: CGPoint {
+        switch self {
+        case .center: CGPoint(x:  0, y:  0)
+        case .left:   CGPoint(x: -1, y:  0)  // pupil right → shift left
+        case .right:  CGPoint(x:  1, y:  0)  // pupil left  → shift right
+        case .up:     CGPoint(x:  0, y: -1)  // pupil up    → shift down
+        case .down:   CGPoint(x:  0, y:  1)  // pupil down  → shift up
+        }
+    }
 }
 
 // MARK: - GazeEstimator
