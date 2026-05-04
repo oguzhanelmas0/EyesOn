@@ -15,9 +15,16 @@ final class CameraViewModel: ObservableObject {
     @Published var faceObservations: [VNFaceObservation]  = []
     @Published var frameSize: CGSize                     = .zero
     @Published var gazeDirection: GazeDirection?
+    @Published var gazeEstimate: GazeEstimate?
     @Published var processedFrame: NSImage?
-    @Published var correctionEnabled: Bool               = true
+    @Published var correctionEnabled: Bool               = false  // disabled until coordinate mapping is verified
     @Published var validationResult: LandmarkValidationResult?
+
+    // Debug overlay controls
+    @Published var debugOverlayEnabled: Bool = true
+    @Published var showFaceBox:         Bool = true
+    @Published var showLandmarks:       Bool = true
+    @Published var showEyeROI:          Bool = true
 
     private let manager          = CameraManager()
     private let visionProcessor  = VisionProcessor()
@@ -127,11 +134,12 @@ final class CameraViewModel: ObservableObject {
                 let nsImage = render(displayCI, context: ctx)
 
                 // 7. Publish
-                faceObservations = result.observations
-                frameSize        = result.imageSize
-                gazeDirection    = smoothedDirection
-                validationResult = validation
-                processedFrame   = nsImage
+                faceObservations  = result.observations
+                frameSize         = result.imageSize
+                gazeDirection     = smoothedDirection
+                self.gazeEstimate = gazeEstimate
+                validationResult  = validation
+                processedFrame    = nsImage
             }
         }
     }

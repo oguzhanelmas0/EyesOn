@@ -27,60 +27,50 @@ struct ContentView: View {
 
     @ViewBuilder
     private var runningView: some View {
-        ZStack(alignment: .bottomTrailing) {
-            // Processed (or raw) video frame
-            frameView
+        VStack(spacing: 0) {
+            // Video + overlays
+            ZStack(alignment: .bottomTrailing) {
+                frameView
 
-            // Landmark overlay: only when correction is OFF
-            // (when ON, shifted pixels make the original landmarks appear misaligned)
-            if !viewModel.correctionEnabled {
-                FaceOverlayView(
-                    observations: viewModel.faceObservations,
-                    frameSize: viewModel.frameSize
-                )
-                .ignoresSafeArea()
-            }
-
-            // Top: active correction banner OR rejection reason
-            VStack {
-                if viewModel.isCorrecting {
-                    statusPill("⚡ Göz teması düzeltiliyor", color: .green)
-                } else if viewModel.correctionEnabled && !viewModel.isCorrectionSafe,
-                          let reason = viewModel.rejectionReason {
-                    statusPill("⚠ \(reason)", color: .orange)
+                // Debug overlay — always on top when enabled (correction state irrelevant)
+                if viewModel.debugOverlayEnabled {
+                    LandmarkDebugOverlay(
+                        observations:     viewModel.faceObservations,
+                        frameSize:        viewModel.frameSize,
+                        gazeEstimate:     viewModel.gazeEstimate,
+                        validationResult: viewModel.validationResult,
+                        showFaceBox:      viewModel.showFaceBox,
+                        showLandmarks:    viewModel.showLandmarks,
+                        showEyeROI:       viewModel.showEyeROI
+                    )
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
                 }
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 12)
-            .allowsHitTesting(false)
 
-            // Bottom-left: landmark validation debug text
-            VStack {
-                Spacer()
-                HStack {
-                    if let debug = viewModel.validationResult?.debugText {
-                        Text(debug)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(viewModel.isCorrectionSafe ? .green : .orange)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.black.opacity(0.6))
-                            .cornerRadius(6)
+                // Top: active correction banner OR rejection reason
+                VStack {
+                    if viewModel.isCorrecting {
+                        statusPill("⚡ Göz teması düzeltiliyor", color: .green)
+                    } else if viewModel.correctionEnabled && !viewModel.isCorrectionSafe,
+                              let reason = viewModel.rejectionReason {
+                        statusPill("⚠ \(reason)", color: .orange)
                     }
                     Spacer()
                 }
-                .padding(.leading, 10)
-                .padding(.bottom, 10)
-            }
-            .allowsHitTesting(false)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+                .allowsHitTesting(false)
 
-            // Bottom-right HUD
-            VStack(alignment: .trailing, spacing: 10) {
-                GazeDirectionView(direction: viewModel.gazeDirection)
-                correctionToggle
+                // Bottom-right HUD
+                VStack(alignment: .trailing, spacing: 10) {
+                    GazeDirectionView(direction: viewModel.gazeDirection)
+                    correctionToggle
+                }
+                .padding(16)
             }
-            .padding(16)
+
+            // Debug control bar
+            debugControlBar
         }
     }
 
@@ -98,6 +88,43 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Debug control bar
+
+    private var debugControlBar: some View {
+        HStack(spacing: 12) {
+            debugToggle("🐞 Debug",  binding: $viewModel.debugOverlayEnabled, tint: .purple)
+            if viewModel.debugOverlayEnabled {
+                Divider().frame(height: 16)
+                debugToggle("□ Yüz",    binding: $viewModel.showFaceBox,   tint: .green)
+                debugToggle("□ Marks",  binding: $viewModel.showLandmarks,  tint: .cyan)
+                debugToggle("□ ROI",    binding: $viewModel.showEyeROI,     tint: .cyan)
+                Divider().frame(height: 16)
+            }
+            debugToggle("⚡ Düzeltme", binding: $viewModel.correctionEnabled, tint: .yellow)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.black.opacity(0.85))
+    }
+
+    private func debugToggle(_ title: String, binding: Binding<Bool>, tint: Color) -> some View {
+        Button {
+            binding.wrappedValue.toggle()
+        } label: {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(binding.wrappedValue ? tint : .gray)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(binding.wrappedValue ? tint.opacity(0.18) : Color.clear)
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Shared
+
     private func statusPill(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption.bold())
@@ -114,7 +141,7 @@ struct ContentView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: viewModel.correctionEnabled ? "eye.fill" : "eye.slash.fill")
-                Text(viewModel.isCorrecting  ? "Düzeltiyor ✓" :
+                Text(viewModel.isCorrecting   ? "Düzeltiyor ✓" :
                      viewModel.correctionEnabled ? "Düzeltme Açık" : "Düzeltme Kapalı")
             }
             .font(.caption.bold())
