@@ -23,3 +23,16 @@ build/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# AppleDouble sidecar files (exFAT/harici disk)
+._*
+
+# Referans projeler (~4.9 GB, repoya girmez)
+Examples/
+
+# ML model dosyaları (README hariç) — indirme talimatı models/README.md içinde
+models/*
+!models/README.md
+
+# Test video varlıkları — gerçek insan yüzü içerir, public repoya girmez
+tests/assets/
