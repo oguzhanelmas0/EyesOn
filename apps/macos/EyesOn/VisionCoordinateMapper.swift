@@ -56,6 +56,13 @@ struct VisionCoordinateMapper {
                           y: fb.minY + local.y * fb.height))
     }
 
+    /// CIImage pixel (bottom-left origin) → SwiftUI view pixel (top-left origin).
+    /// Lets the debug overlay draw values the correction pipeline computed in image space.
+    func imagePxToViewPt(_ p: CGPoint) -> CGPoint {
+        guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
+        return toViewPt(CGPoint(x: p.x / imageSize.width, y: p.y / imageSize.height))
+    }
+
     // MARK: - Helpers
 
     /// Centroid of a landmark region in CIImage pixel space.

@@ -72,8 +72,11 @@ işlenmeye başlamıyor.
 
 ⚠️ **Bilinen risk:** `@Published` özelliklere `@MainActor` izolasyonu olmadan yazılıyor
 (`startFrameProcessing` içindeki Task main actor'a bağlı değil). SwiftUI'ın ana thread
-dışından güncellenmesi Swift 6 strict concurrency altında hata verebilir. **TODO: verify** —
-derleme uyarısı çıkıyor mu.
+dışından güncellenmesi Swift 6 strict concurrency altında hata verebilir.
+**Doğrulandı (2026-09-01):** Swift 5 modunda derlemede **uyarı çıkmıyor.** Ancak bu
+sorunun olmadığı anlamına gelmez — Swift 6 diline geçildiğinde hata verecektir ve
+çalışma zamanında ana thread dışı UI güncellemesi hâlâ mümkündür. MVP 1'de
+`@MainActor` izolasyonu eklenmelidir.
 
 **Planlanan (MVP 5):** referans projedeki üç iş parçacıklı yapı
 (`reference/gaze-corrector/pipeline.py`):

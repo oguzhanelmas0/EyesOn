@@ -4,9 +4,11 @@ final class CameraManager: NSObject {
 
     let captureSession = AVCaptureSession()
 
-    // nonisolated let: safely accessible from any thread or actor
-    nonisolated let frameStream: AsyncStream<CMSampleBuffer>
-    nonisolated private let frameContinuation: AsyncStream<CMSampleBuffer>.Continuation
+    // CameraManager is not actor-isolated, so these are reachable from the capture
+    // queue and from the main actor alike. Marking them `nonisolated` was a no-op that
+    // Swift 6 rejects outright, since AsyncStream is not Sendable.
+    let frameStream: AsyncStream<CMSampleBuffer>
+    private let frameContinuation: AsyncStream<CMSampleBuffer>.Continuation
 
     private let videoOutput = AVCaptureVideoDataOutput()
     private let captureQueue = DispatchQueue(label: "com.eyeson.capture", qos: .userInitiated)
@@ -38,6 +40,12 @@ final class CameraManager: NSObject {
     }
 
     private func addVideoOutput() {
+        // Pin the pixel format explicitly. Left unset, AVFoundation picks its own
+        // (typically biplanar YCbCr), which every downstream stage then has to guess at.
+        // Core Image's warp kernels want a plain RGB buffer.
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.setSampleBufferDelegate(self, queue: captureQueue)
         guard captureSession.canAddOutput(videoOutput) else { return }
@@ -71,7 +79,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // frameContinuation is nonisolated let → safe to call from any thread
+        // Called on the capture queue; the continuation is thread-safe by contract.
         frameContinuation.yield(sampleBuffer)
     }
 }

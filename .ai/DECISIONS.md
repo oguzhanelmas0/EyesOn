@@ -46,35 +46,34 @@ olacak.
 
 ---
 
-## ADR-002 — macOS'ta MediaPipe çalıştırma yolu
+## ADR-002 — macOS'ta MediaPipe çalıştırma yolu: ONNX Runtime
 
-**Status:** ⚠️ **Open — karar verilmedi** · 2026-08-29
+**Status:** Accepted · 2026-09-01
 
 ### Context
-MediaPipe Tasks'ın resmî Swift dağıtımı (`MediaPipeTasksVision` CocoaPod) **iOS'u
-hedefler.** macOS için hazır bir prebuilt paket bilinmiyor. ADR-001 uygulanabilmesi için
-bu sorunun cevaplanması gerekiyor.
+MediaPipe Tasks'ın resmî Swift dağıtımı (`MediaPipeTasksVision` CocoaPod) iOS'u hedefler.
+macOS üzerinde 478 MediaPipe landmark'ını (10 iris noktası dahil) yüksek hızda ve sıfır
+derleme sancısıyla çalıştırmamız gerekiyordu.
 
 ### Decision
-**Henüz verilmedi.** MVP 2'nin ilk işi bir teknik sondaj (spike): macOS'ta tek bir kareyi
-Face Landmarker'dan geçirip 478 nokta almak.
+`face_landmarks_detector.tflite` modeli ONNX formatına dönüştürüldü (`models/face_landmarks_detector.onnx`).
+macOS uygulamasına Microsoft'un resmî `microsoft/onnxruntime-swift-package-manager` (SPM)
+paketi bağlandı ve `ONNXFaceLandmarker.swift` üzerinden doğrudan çalıştırıldı.
 
 ### Alternatives
-
-| Seçenek | Artı | Eksi |
-|---|---|---|
-| MediaPipe C API'sini Bazel ile macOS için derlemek | Resmî pipeline, tam özellik | Bazel zinciri ağır, CI'da acı |
-| Alttaki TFLite modellerini doğrudan çalıştırmak (LiteRT) | Az bağımlılık | Yüz tespit → landmark hattını elle kurmak gerekir |
-| ONNX'e çevirip ONNX Runtime ile çalıştırmak | Windows ile aynı runtime | Dönüşüm doğruluğu test edilmeli |
-| Apple Vision + yalnız iris için ikinci model | En az iş | İki sistem, karmaşa, ADR-001'in amacını zayıflatır |
+- Bazel ile MediaPipe C++ derlemek — çok ağır geliştirme/CI maliyeti.
+- CoreML doğrudan dönüşüm — tflite2coreml özel pooling/conv opsiyonlarında uyumsuzluk verdi.
+- TFLite C library — SPM desteği eksik, macOS için manuel xcframework gerektiriyor.
 
 ### Reason
-Seçim, sondajda hangisinin gerçekten çalıştığına göre yapılacak. Masa başında karar
-vermek için yeterli bilgi yok — **TODO: verify.**
+- **Performans:** Apple Silicon üzerinde ortalama **2.36 ms / kare** çıkarım süresi (60+ fps hedefinin çok ötesinde).
+- **Entegrasyon kolaylığı:** Xcode SPM üzerinden temiz bağımlılık yönetimi.
+- **Platform uyumluluğu:** Windows aşamasında da aynı ONNX modeli ve ONNX Runtime doğrudan kullanılabilecek.
 
 ### Consequences
-Bu karar `core/` klasörünün dilini de belirleyecek (ADR-004). MediaPipe'ı zaten C++ olarak
-bağlıyorsak paylaşılan çekirdeği de C++ yazmak doğal seçim olur.
+- `face_landmarks_detector.onnx` (4.7 MB) bundle içine eklendi.
+- `ONNXFaceLandmarker` 478 3B landmark'ı (10 iris noktası dahil) piksel koordinatlarıyla üretir.
+- `MediaPipeFaceAdapter` ile landmark kaynağı Vision'dan MediaPipe'a taşındı.
 
 ---
 
@@ -172,3 +171,121 @@ Kod, tanımlayıcılar ve kod içi yorumlar **İngilizce**.
 
 Sebep: proje sahibi Türkçe çalışıyor; kod ise standart İngilizce konvansiyonlarına
 uymalı ki üçüncü taraf kütüphanelerle ve gelecekteki katkıcılarla tutarlı olsun.
+
+
+---
+
+## ADR-007 — Hibrit bakış tahmini: davranış Yöntem A'dan, düzeltme Yöntem B'den
+
+**Status:** Accepted · 2026-09-01
+
+### Context
+Referans projelerden iki farklı bakış tahmin yöntemi port edildi:
+
+- **Yöntem A (iris offset)** — `reference/gaze-corrector`. İris'in göz merkezinden
+  sapmasını ölçer. Yönü tartışmasız doğru, ama girdi kalitesine bağlı.
+- **Yöntem B (3B geometri)** — `reference/deepwarp-cam`. Gözün 3B konumunu gözler arası
+  mesafeden çıkarır, kameraya bakmak için gereken dönme açısını hesaplar. **İris'e hiç
+  bakmaz.**
+
+Canlı uygulamada ölçüldü: Apple Vision'ın pupil noktası göz merkezinden yalnızca
+**2–3 piksel** ayrılıyor (`rawOff ≈ (-0.037, 0.057)`), eşiklerin (0.10 / 0.08) çok
+altında. Yani Yöntem A'nın girdisi bugün pratikte sıfır.
+
+### Decision
+İkisi de çalışır, farklı işler için:
+
+- **Düzeltme vektörü** varsayılan olarak **Yöntem B**'den gelir. Arayüzden A'ya
+  geçilebilir (MediaPipe sonrası A'nın değerli olacağı yer burası).
+- **Davranış FSM'i her zaman Yöntem A'nın bakış açısıyla beslenir**, düzeltme B'den
+  gelse bile.
+
+### Alternatives
+- Yalnızca A — bugün neredeyse hiç düzeltme üretmez
+- Yalnızca B — "kullanıcı başka yere baktı" durumunu asla göremez
+- MediaPipe'ı bekleyip hiçbir şey yapmamak — boru hattının geri kalanı doğrulanmadan kalırdı
+
+### Reason
+FSM'in bilmesi gereken şey "kullanıcı kameradan ne kadar uzağa bakıyor"dur ve bunu
+yalnızca iris söyleyebilir. Yöntem B'nin açısı ekrana bakan biri için sabite yakındır
+(kamera ekranın 21 cm üstündeyse ~19°) ve kullanıcı notlarına baktığında **değişmez** —
+çünkü göz konumu değil, iris hareket eder. B'yi FSM'e bağlamak, davranış tespitini
+tamamen kör ederdi.
+
+### Consequences
+- Vision'la FSM pratikte hep ENGAGED kalır (iris sinyali zayıf). Bu güvenlidir: kafa
+  açısı zorlaması (yaw 20° / pitch 15°) hâlâ çalışır ve gerçek koruma odur.
+- MediaPipe geldiğinde FSM kendiliğinden anlamlı hale gelir; kod değişmez.
+- ⚠️ Yöntem B'nin **yatay** işaret yönü doğrulanmadı (P7). Dikey işaret fizikten
+  türetildi ve gerekçesi kodda yazılı.
+
+---
+
+## ADR-008 — Warp politikası CPU'da, shader saf fonksiyon
+
+**Status:** Accepted · 2026-09-01
+
+### Context
+Eski `GaussianEyeWarp.metal` iki nokta (`pupilCenter`, `eyeCenter`) alıp farkı GPU'da
+hesaplıyordu. Swift tarafında hesaplanan `maxPixelShift` clamp'i GPU'ya hiç ulaşmıyordu —
+bu bir bug'dı (P1) ve sınıfsal olarak tekrar edebilir bir bug'dı.
+
+### Decision
+Kernel artık **hazır bir deplasman vektörü** alıyor. Clamp, güç, davranış blend'i —
+tüm politika `GazePipeline` içinde CPU'da karara bağlanıp GPU'ya pişmiş halde gidiyor.
+
+### Alternatives
+Clamp'i shader'a taşımak — kernel'e daha çok parametre eklerdi ve politikayı test
+edilemez bir yere koyardı.
+
+### Reason
+Shader'ı girdilerinin saf bir fonksiyonu yapmak, P1'in **sınıf olarak** tekrar etmesini
+imkânsız kılar: GPU'ya giden değerle CPU'nun hesapladığı değer artık aynı şeydir.
+Yan fayda: warp geometrisi GPU olmadan unit test edilebilir hale geldi.
+
+### Consequences
+- Eski CPU fallback'i kaldırıldı (kendi yorumunun da dediği gibi "hayalet iris"
+  bırakıyordu, doğallık önceliğiyle çelişiyordu). Metal yüklenemezse düzeltme sessizce
+  atlanır — kare olduğu gibi geçer, ki bu her zaman geçerli bir çıktıdır.
+
+
+---
+
+## ADR-009 — Warp izole yamada yapılır, maskeyle harmanlanır; asla zincirlenmez
+
+**Status:** Accepted · 2026-09-01
+
+### Context
+İlk entegrasyonda referans projelerin *algoritmaları* (FSM, EMA, iris offset, 3B geometri)
+port edildi ama **warp yapısı** port edilmedi; mevcut Metal Gaussian kernel'i tüm kare
+üzerinde, iki göz zincirlenerek uygulandı. Bu, tüm kareyi bozan bir yayılmaya yol açtı
+(EXP-003).
+
+### Decision
+`reference/gaze-corrector/gaze_corrector.py` yapısı birebir uygulanır:
+
+1. Göz ROI'si ayrı bir görüntüye kırpılır
+2. Warp yalnızca o izole yamada çalışır
+3. Göz konturunun convex hull'undan Gaussian-feather'lı maske üretilir
+4. Yama, maske içinde kareye harmanlanır
+
+Ve: **her göz yaması daima orijinal kareden üretilir.** Bir gözün çıktısı diğerinin
+girdisi olamaz.
+
+### Alternatives
+- Zincirin arasına `cropped(to:)` eklemek — yayılmayı durduruyordu ama maskeyi ve
+  onun sağladığı göz kapağı korumasını getirmiyordu
+- Tüm kare üzerinde warp'a geri dönmek — eski davranış; iki tam kare GPU geçişi
+
+### Reason
+İzole yama, bu hata **sınıfını** imkânsız kılar: ROI dışındaki hiçbir piksel grafiğin
+parçası değildir. Maske ise referansın asıl katkısıdır — göz konturunun dışındaki her şey
+orijinal piksellere sabitlenir, yani warp ne yaparsa yapsın göz kapağı, kirpik ve deri
+deforme olamaz. Bu, [AGENTS.md](../AGENTS.md) önceliklerindeki 1. madde (natural visual
+quality) için pazarlık konusu değildir.
+
+### Consequences
+- Kare başına iki küçük CGContext maske çizimi eklendi (ROI ~200×160, ihmal edilebilir)
+- `EyeWarp` artık göz konturunu ve feather yarıçapını taşıyor
+- Feather ve dilate, sabit piksel yerine göz genişliğinin oranı (%22 / %12) — mesafeden
+  bağımsız

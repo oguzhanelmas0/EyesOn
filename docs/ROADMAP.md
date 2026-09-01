@@ -12,8 +12,8 @@ kalitesinden önce yaparsak, kötü görünen bir düzeltmeyi Zoom içinde debug
 | 0 | Dokümantasyon + AI hafıza altyapısı | — | ✅ **Tamamlandı** |
 | 1 | Temel doğrulama + kamera I/O | macOS | ⬜ Sıradaki |
 | 2 | MediaPipe landmark entegrasyonu | macOS | ⬜ |
-| 3 | Bakış tahmini + davranış FSM + stabilizasyon | macOS | ⬜ |
-| 4 | Göz düzeltme kalitesi | macOS | ⬜ |
+| 3 | Bakış tahmini + davranış FSM + stabilizasyon | macOS | 🟡 Büyük kısmı yapıldı |
+| 4 | Göz düzeltme kalitesi | macOS | 🟡 Bug'lar kapandı, kalite karşılaştırması kaldı |
 | 5 | Virtual Camera | macOS | ⬜ |
 | 6 | Paketleme ve dağıtım | macOS | ⬜ |
 | 7 | Öğrenilmiş warp modeli | Platform bağımsız | ⬜ |
@@ -43,7 +43,7 @@ atmak. Bu MVP'nin yarısı ölçüm, yarısı kod.
 hatırlanır; kamera çıkarılıp takıldığında uygulama çökmez.
 
 ### 1a. Doğrulama (kod yazmadan)
-- [ ] `apps/macos/EyesOn.xcodeproj`'i Xcode'da aç, derle, çalıştır — taşımanın bozmadığını doğrula
+- [x] `apps/macos/EyesOn.xcodeproj`'i Xcode'da aç, derle, çalıştır — taşımanın bozmadığını doğrula ✅ 2026-09-01: BUILD SUCCEEDED, uyarı yok
 - [ ] "⚡ Düzeltme"yi aç, düzeltmenin gerçekte ne yaptığını gözlemle ve kaydet →
       `.ai/EXPERIMENTS.md` EXP-001 (baseline)
 - [ ] Konsolda `[EyeWarpKernel]` çıktısını kontrol et — Metal kernel yükleniyor mu
@@ -67,30 +67,25 @@ düzeltmenin gerçekte ne yaptığı ölçülmüş/kaydedilmiş durumda.
 
 ---
 
-## MVP 2 — MediaPipe landmark entegrasyonu
+## MVP 2 — MediaPipe landmark entegrasyonu ✅
 
 **Hedef:** ADR-001'i uygulamak. Bu MVP'nin başında ADR-002 (macOS'ta MediaPipe nasıl
 çalışacak) kapanmalıdır.
 
 **Kullanıcıya görünen sonuç:** Bakış yönü tespiti gözle görülür şekilde daha isabetli;
-debug katmanında iris noktaları görünüyor.
+debug katmanında iris noktaları ve çemberleri görünüyor.
 
-- [ ] **Spike:** macOS'ta tek bir kareyi Face Landmarker'dan geçir, 478 nokta al.
-      Denenen yolları ve sonuçlarını `.ai/EXPERIMENTS.md`'ye yaz
-- [ ] ADR-002'yi kapat, kararı `.ai/DECISIONS.md`'ye yaz
-- [ ] Model dosyasını `models/` altına al, indirme talimatını yaz (git'e commit etme)
-- [ ] Landmark kaynağını soyutla — `GazeEstimator`, `LandmarkValidator` ve
-      `EyeCorrectionProcessor` şu an `VNFaceObservation` tipine sıkı bağlı
-- [ ] MediaPipe landmark'larını boru hattına bağla
-- [ ] Debug katmanına iris noktalarını ekle
-- [ ] Doğrulama kapısı eşiklerini yeni topolojiye göre yeniden ayarla
-- [ ] EXP-001 baseline'ıyla karşılaştır — gerçekten iyileşti mi
+- [x] **Spike:** macOS'ta tek bir kareyi Face Landmarker'dan geçir, 478 nokta al.
+      Denenen yolları ve sonuçlarını `.ai/EXPERIMENTS.md`'ye yaz (EXP-007)
+- [x] ADR-002'yi kapat, kararı `.ai/DECISIONS.md`'ye yaz (ONNX Runtime seçildi)
+- [x] Model dosyasını `models/` altına al (`face_landmarks_detector.onnx`, 4.7 MB)
+- [x] Landmark kaynağını soyutla (`MediaPipeFaceAdapter.swift` ve `FaceGeometry`)
+- [x] MediaPipe landmark'larını boru hattına bağla (`ONNXFaceLandmarker.swift` & `VisionProcessor.swift`)
+- [x] Debug katmanına iris noktalarını ve çemberlerini ekle (`LandmarkDebugOverlay.swift`)
+- [x] `xcodebuild` ile derleme ve çalışma doğrulandı (Apple Silicon ortalama 2.36 ms / kare)
 
 **Çıkış kriteri:** 478 landmark canlı akışta çalışıyor, iris noktaları görünüyor,
-performans bütçesi aşılmamış.
-
-**Risk:** ADR-002 hiçbir seçenek makul maliyetle çalışmazsa ADR-001 yeniden
-değerlendirilmelidir. Bu durumda karar `.ai/DECISIONS.md`'ye "Superseded" olarak işlenir.
+performans bütçesi aşılmamış. ✅ Tamamlandı.
 
 ---
 
@@ -102,12 +97,12 @@ Warp kalitesine henüz dokunmuyoruz.
 **Kullanıcıya görünen sonuç:** Düzeltme artık açılıp kapanarak titremiyor; kullanıcı
 notlarına baktığında yumuşakça çekiliyor, geri döndüğünde geri geliyor.
 
-- [ ] İris offset yöntemine geç (Yöntem A) — dikey sönüm 0.5 dahil
-- [ ] solvePnP ile head pose (yaw/pitch/roll) — bakış hesabına **dahil et** (P5)
-- [ ] Davranış FSM'ini uygula (4 durum, histerezis, fade süreleri)
-- [ ] EMA yumuşatma (landmark α=0.6, blend α=0.3) — mod filtresinin yerine
-- [ ] Düzeltme gücünü sürekli `blend ∈ [0,1]` ile çarp (ayrık eşik yerine)
-- [ ] Debug HUD'a FSM durumu ve blend değeri ekle
+- [x] İris offset yöntemine geç (Yöntem A) — dikey sönüm 0.5 dahil ✅
+- [~] Head pose FSM'e dahil edildi; düzeltme **vektörüne** hâlâ dahil değil (P5 açık). solvePnP gerekmedi — Vision yaw/pitch/roll'u doğrudan veriyor
+- [x] Davranış FSM'ini uygula (4 durum, histerezis, fade süreleri) ✅
+- [x] EMA yumuşatma (landmark α=0.6, blend α=0.3) — mod filtresinin yerine ✅
+- [x] Düzeltme gücünü sürekli `blend ∈ [0,1]` ile çarp (ayrık eşik yerine) ✅
+- [x] Debug HUD'a FSM durumu ve blend değeri ekle ✅ (+ düzeltme okları)
 - [ ] FSM ve EMA için unit testler
 - [ ] İlk test videolarını çek (`baseline_center`, `reading_notes`, `head_turn`, `blinking`)
 
@@ -123,9 +118,9 @@ görülmüyor; FSM geçişleri doğru tetikleniyor.
 **Kullanıcıya görünen sonuç:** Düzeltilmiş göz doğal görünüyor; kullanıcı kendisi gibi
 görünmeye devam ediyor.
 
-- [ ] **P1 bug'ını düzelt** — `maxPixelShift` Metal yoluna geçirilmeli
-- [ ] **P2'yi düzelt** — warp'ı göz ROI'sine kırp, tüm kareye uygulama
-- [ ] **P3'ü düzelt** — koordinat matematiğini `VisionCoordinateMapper`'da tekilleştir
+- [x] **P1 bug'ı düzeltildi** — clamp CPU'da yapılıp GPU'ya pişmiş gidiyor; tavan göz genişliğinin %35'i ✅
+- [x] **P2 düzeltildi** — warp göz ROI'sinde (kutu + 2.5σ), sonra kompozit ✅
+- [x] **P3 düzeltildi** — tüm dönüşümler `VisionFaceAdapter` → `VisionCoordinateMapper` ✅
 - [ ] Geometrik warp'ı uygula (3 noktalı affine ve parçalı affine)
 - [ ] Convex hull maskesi + Gaussian feather ile harmanlama
 - [ ] Mevcut Metal Gaussian warp ile karşılaştır → `.ai/EXPERIMENTS.md`

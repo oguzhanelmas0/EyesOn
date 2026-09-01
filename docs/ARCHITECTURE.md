@@ -83,12 +83,25 @@ ayrıca işaretlenmiştir.
 | Warp kernel yükleyici | `EyeWarpKernel.swift` (64) | `default.metallib` | `CIWarpKernel` | Core Image |
 | Warp shader | `GaussianEyeWarp.metal` (33) | piksel koordinatı | kaynak koordinatı | Metal |
 | Koordinat dönüşümü | `VisionCoordinateMapper.swift` (90) | normalize nokta | piksel (CIImage / view) | CoreGraphics, Vision |
-| UI | `ContentView.swift` (184) | ViewModel | ekran | SwiftUI |
+| **Sabitler** | `Core/CorrectionConfig.swift` | — | tüm eşikler | — |
+| **Geometri tipleri** | `Core/FaceGeometry.swift` | — | kaynak-bağımsız `FaceGeometry` | CoreGraphics |
+| **Yumuşatma** | `Core/EMAFilter.swift` | `FaceGeometry` | yumuşatılmış `FaceGeometry` | — |
+| **Davranış FSM** | `Core/BehaviorFSM.swift` | bakış açısı + kafa pozu | `blend ∈ [0,1]` | — |
+| **Bakış — Yöntem A** | `Core/IrisGazeEstimator.swift` | `FaceGeometry` | `GazeInfo` | — |
+| **Bakış — Yöntem B** | `Core/GazeGeometry3D.swift` | `FaceGeometry` | `GazeGeometryResult` | — |
+| **Vision adaptörü** | `Core/VisionFaceAdapter.swift` | `VNFaceObservation` | `FaceGeometry` | Vision |
+| **Boru hattı** | `Core/GazePipeline.swift` | `FaceGeometry` | `CorrectionPlan` | QuartzCore |
+| UI | `ContentView.swift` | ViewModel | ekran | SwiftUI |
 | UI overlay | `FaceOverlayView.swift` (65), `GazeDirectionView.swift` (72), `LandmarkDebugOverlay.swift` (208) | gözlemler | debug çizimi | SwiftUI |
 | İzin ekranı | `PermissionDeniedView.swift` (35) | — | ekran | SwiftUI |
 | App girişi | `EyesOnApp.swift` (17) | — | `WindowGroup` | SwiftUI |
 
-Toplam ~1550 satır Swift + Metal. Tek uygulama target'ı, test target'ı yok.
+Toplam ~2400 satır Swift + Metal. Tek uygulama target'ı, test target'ı yok.
+
+`Core/` altındaki hiçbir dosya Vision'a bağımlı değildir — `VisionFaceAdapter` tek
+köprüdür. ADR-001 uygulandığında yerine bir `MediaPipeFaceAdapter` konur ve alt katmanda
+hiçbir şey değişmez. Bu, çekirdeğin ileride `core/` klasörüne çıkarılabilmesinin de ön
+koşuludur.
 
 ## Koordinat sistemleri
 

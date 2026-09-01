@@ -5,20 +5,35 @@ import CoreImage
 import Metal
 import Vision
 
+@MainActor
 final class CameraViewModel: ObservableObject {
 
     enum CameraState {
         case loading, running, denied, unavailable
     }
 
-    @Published var cameraState: CameraState              = .loading
-    @Published var faceObservations: [VNFaceObservation]  = []
-    @Published var frameSize: CGSize                     = .zero
-    @Published var gazeDirection: GazeDirection?
-    @Published var gazeEstimate: GazeEstimate?
+    // MARK: - Published state
+
+    @Published var cameraState: CameraState             = .loading
+    @Published var faceObservations: [VNFaceObservation] = []
+    @Published var mediaPipeLandmarks: [Landmark3D]?    = nil
+    @Published var landmarkSource: String               = "MediaPipe"
+    @Published var frameSize: CGSize                    = .zero
     @Published var processedFrame: NSImage?
-    @Published var correctionEnabled: Bool               = false  // disabled until coordinate mapping is verified
     @Published var validationResult: LandmarkValidationResult?
+
+    /// Full per-frame result of the gaze pipeline: warps, behaviour state, both
+    /// estimators' output. Drives both the correction and the debug HUD.
+    @Published var plan: CorrectionPlan?
+    @Published var gazeDirection: GazeDirection?
+
+    // Correction controls
+    /// Left on during active development so each run starts correcting.
+    @Published var correctionEnabled: Bool = true
+    @Published var correctionStrength: CGFloat = CorrectionConfig.defaultStrength
+    /// Debug multiplier. Default 1.0.
+    @Published var debugGain: CGFloat = 1.0
+    @Published var gazeMethod: GazeMethod = .irisOffset
 
     // Debug overlay controls
     @Published var debugOverlayEnabled: Bool = true
@@ -26,8 +41,11 @@ final class CameraViewModel: ObservableObject {
     @Published var showLandmarks:       Bool = true
     @Published var showEyeROI:          Bool = true
 
-    private let manager          = CameraManager()
-    private let visionProcessor  = VisionProcessor()
+    // MARK: - Private
+
+    private let manager         = CameraManager()
+    private let visionProcessor = VisionProcessor()
+    private let pipeline        = GazePipeline()
     private var processingTask: Task<Void, Never>?
     private var directionSmoother = GazeSmoother(size: 6)
 
@@ -39,9 +57,7 @@ final class CameraViewModel: ObservableObject {
     var captureSession: AVCaptureSession { manager.captureSession }
 
     var isCorrecting: Bool {
-        correctionEnabled
-            && (validationResult?.isSafe == true)
-            && (gazeDirection ?? .center) != .center
+        correctionEnabled && (validationResult?.isSafe == true) && (plan?.isCorrecting == true)
     }
 
     var isCorrectionSafe: Bool { validationResult?.isSafe ?? false }
@@ -62,17 +78,13 @@ final class CameraViewModel: ObservableObject {
         manager.stopSession()
     }
 
-    // MARK: - Permission
-
     private func requestPermission() {
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+        AVCaptureDevice.requestAccess(for: .video) { granted in
             Task { @MainActor [weak self] in
                 if granted { self?.launchCamera() } else { self?.cameraState = .denied }
             }
         }
     }
-
-    // MARK: - Pipeline
 
     private func launchCamera() {
         manager.setup()
@@ -82,69 +94,76 @@ final class CameraViewModel: ObservableObject {
         startFrameProcessing()
     }
 
+    // MARK: - Frame pipeline
+
     private func startFrameProcessing() {
         let stream    = manager.frameStream
         let processor = visionProcessor
         let ctx       = ciContext
 
-        processingTask = Task {
+        processingTask = Task { @MainActor in
             for await sampleBuffer in stream {
                 guard !Task.isCancelled else { break }
                 guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { continue }
 
-                // 1. Vision — background thread via actor
+                // 1. Face & Landmark processing
                 let result = await processor.process(pixelBuffer: pixelBuffer)
 
-                // 2. Landmark validation — gates all correction
-                let validation = result.observations.first.map { LandmarkValidator.validate($0) }
-
-                // 3. Gaze estimate — continuous offset + discrete direction
-                let gazeEstimate: GazeEstimate?
-                if validation?.isSafe == true {
-                    gazeEstimate = result.observations.first.flatMap { GazeEstimator.estimate(from: $0) }
-                } else {
-                    gazeEstimate = nil
-                }
-
-                // 4. Smooth discrete direction for UI display
-                let smoothedDirection: GazeDirection?
-                if let est = gazeEstimate {
-                    smoothedDirection = directionSmoother.add(est.direction)
-                } else {
-                    directionSmoother.reset()
-                    smoothedDirection = nil
-                }
-
-                // 5. Eye correction — uses continuous rawOffset for proportional shift
-                var displayCI = result.ciImage
-                if correctionEnabled,
-                   let obs   = result.observations.first,
-                   let valid = validation,
-                   let est   = gazeEstimate,
-                   est.direction != .center {
-                    displayCI = EyeCorrectionProcessor.correct(
-                        image: displayCI,
-                        observation: obs,
-                        gazeEstimate: est,
-                        validation: valid
+                // 2. Validation gate
+                let validation: LandmarkValidationResult?
+                if let obs = result.observations.first {
+                    validation = LandmarkValidator.validate(obs)
+                } else if result.faceGeometry != nil {
+                    validation = LandmarkValidationResult(
+                        isSafe: true,
+                        rejectionReason: nil,
+                        headYawDeg: result.faceGeometry?.headPose.yawDeg ?? 0,
+                        headPitchDeg: result.faceGeometry?.headPose.pitchDeg ?? 0,
+                        leftEyeAR: result.faceGeometry?.leftEye.aspectRatio ?? 0.3,
+                        rightEyeAR: result.faceGeometry?.rightEye.aspectRatio ?? 0.3,
+                        interEyeDist: 0.25
                     )
+                } else {
+                    validation = nil
                 }
 
-                // 6. Render → NSImage
+                // 3. Geometry → Gaze → Behaviour → Warp plan
+                var framePlan: CorrectionPlan?
+                if validation?.isSafe == true, let face = result.faceGeometry {
+                    framePlan = pipeline.process(
+                        face: face,
+                        strength: correctionStrength,
+                        gain: debugGain,
+                        method: gazeMethod
+                    )
+                } else {
+                    pipeline.reset()
+                    directionSmoother.reset()
+                }
+
+                // 4. Correction
+                var displayCI = result.ciImage
+                if correctionEnabled, let framePlan {
+                    displayCI = EyeCorrectionProcessor.apply(framePlan, to: displayCI)
+                }
+
+                // 5. Render
                 let nsImage = render(displayCI, context: ctx)
 
-                // 7. Publish
-                faceObservations  = result.observations
-                frameSize         = result.imageSize
-                gazeDirection     = smoothedDirection
-                self.gazeEstimate = gazeEstimate
-                validationResult  = validation
-                processedFrame    = nsImage
+                // 6. Publish
+                faceObservations    = result.observations
+                mediaPipeLandmarks  = result.mediaPipeLandmarks
+                landmarkSource      = result.mediaPipeLandmarks != nil ? "MediaPipe (478 pts)" : "Apple Vision"
+                frameSize           = result.imageSize
+                validationResult    = validation
+                plan                = framePlan
+                gazeDirection       = framePlan.map { directionSmoother.add($0.direction) }
+                processedFrame      = nsImage
             }
         }
     }
 
-    private func render(_ ciImage: CIImage, context: CIContext) -> NSImage? {
+    private nonisolated func render(_ ciImage: CIImage, context: CIContext) -> NSImage? {
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
         return NSImage(cgImage: cgImage, size: ciImage.extent.size)
     }

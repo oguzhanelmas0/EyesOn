@@ -35,13 +35,16 @@ struct ContentView: View {
                 // Debug overlay — always on top when enabled (correction state irrelevant)
                 if viewModel.debugOverlayEnabled {
                     LandmarkDebugOverlay(
-                        observations:     viewModel.faceObservations,
-                        frameSize:        viewModel.frameSize,
-                        gazeEstimate:     viewModel.gazeEstimate,
-                        validationResult: viewModel.validationResult,
-                        showFaceBox:      viewModel.showFaceBox,
-                        showLandmarks:    viewModel.showLandmarks,
-                        showEyeROI:       viewModel.showEyeROI
+                        observations:       viewModel.faceObservations,
+                        mediaPipeLandmarks: viewModel.mediaPipeLandmarks,
+                        landmarkSource:     viewModel.landmarkSource,
+                        frameSize:          viewModel.frameSize,
+                        plan:               viewModel.plan,
+                        validationResult:   viewModel.validationResult,
+                        method:             viewModel.gazeMethod,
+                        showFaceBox:        viewModel.showFaceBox,
+                        showLandmarks:      viewModel.showLandmarks,
+                        showEyeROI:         viewModel.showEyeROI
                     )
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
@@ -101,11 +104,48 @@ struct ContentView: View {
                 Divider().frame(height: 16)
             }
             debugToggle("⚡ Düzeltme", binding: $viewModel.correctionEnabled, tint: .yellow)
+
+            if viewModel.correctionEnabled {
+                Divider().frame(height: 16)
+                methodPicker
+                slider("Güç", value: $viewModel.correctionStrength, range: 0...1, format: "%.2f")
+                slider("Gain", value: $viewModel.debugGain, range: 1...12, format: "%.1f×")
+            }
+
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.black.opacity(0.85))
+    }
+
+    private var methodPicker: some View {
+        Picker("", selection: $viewModel.gazeMethod) {
+            ForEach(GazeMethod.allCases) { m in
+                Text(m.label).tag(m)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 150)
+        .controlSize(.mini)
+    }
+
+    private func slider(_ title: String,
+                        value: Binding<CGFloat>,
+                        range: ClosedRange<CGFloat>,
+                        format: String) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.gray)
+            Slider(value: value, in: range)
+                .frame(width: 80)
+                .controlSize(.mini)
+            Text(String(format: format, value.wrappedValue))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.white.opacity(0.85))
+                .frame(width: 34, alignment: .leading)
+        }
     }
 
     private func debugToggle(_ title: String, binding: Binding<Bool>, tint: Color) -> some View {

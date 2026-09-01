@@ -55,11 +55,11 @@ Hedef pipeline'ın her aşamasının **repository'deki gerçek durumu**:
 | 3 | Face Detection | **Implemented** | `VisionProcessor.swift` — Apple Vision |
 | 4 | Face Tracking | **Partial** | `VNSequenceRequestHandler` kare arası izleme sağlıyor; ayrı bir tracker yok |
 | 5 | Landmark Detection | **Implemented** | Apple Vision `VNDetectFaceLandmarksRequest`; iris yok, kaba pupil var |
-| 6 | Head Pose | **Partial** | Vision'ın `yaw`/`pitch` değerleri yalnızca doğrulama kapısında kullanılıyor; bakış hesabına girmiyor. Roll hiç kullanılmıyor |
-| 7 | Gaze Estimation | **Partial** | `GazeEstimator.swift` — pupil/göz-merkezi offset'i; 5 ayrık yön + ham offset. 3B geometri veya solvePnP yok |
-| 8 | Eye Contact Correction | **Experimental** | `EyeCorrectionProcessor.swift` + `GaussianEyeWarp.metal`. **Varsayılan kapalı**, doğruluğu doğrulanmadı |
-| 9 | Temporal Stabilization | **Partial** | `GazeSmoother` — 6 karelik mod filtresi, yalnızca ayrık yön etiketi için. EMA yok, davranış FSM'i yok, fade yok |
-| 10 | Frame Reconstruction / Blending | **Partial** | Gaussian warp tüm kareye uygulanıyor; maskeli harmanlama yalnızca kullanılmayan CPU fallback'inde var |
+| 6 | Head Pose | **Partial** | Vision'ın yaw/pitch/roll'u `HeadPose` olarak taşınıyor ve davranış FSM'ini besliyor. Düzeltme *vektörünün* hesabına hâlâ girmiyor (P5) |
+| 7 | Gaze Estimation | **Implemented** | İki yöntem: `IrisGazeEstimator` (iris offset) ve `GazeGeometry3D` (IPD'den 3B konum → düzeltme açısı). Arayüzden seçilebiliyor |
+| 8 | Eye Contact Correction | **Experimental** | `GazePipeline` + `GaussianEyeWarp.metal`. Clamp ve ROI kırpma düzeltildi. **Varsayılan kapalı**; yön işareti gözle doğrulanmayı bekliyor (P6/P7) |
+| 9 | Temporal Stabilization | **Implemented** | Landmark/iris/kafa açısı EMA (α=0.6), blend EMA (α=0.3), 4 durumlu davranış FSM'i, 0.4 sn/0.2 sn fade |
+| 10 | Frame Reconstruction / Blending | **Partial** | Warp göz ROI'sine kırpılıp kareye kompozit ediliyor; Gaussian sönümleme 2.5σ'da dikişi görünmez kılıyor. Convex hull maskesi henüz yok |
 | 11 | Virtual Camera | **Not Implemented** | Kod yok. Çıktı yalnızca kendi SwiftUI penceresine gidiyor |
 | 12 | Zoom / Meet / Teams | **Not Implemented** | 11 olmadan mümkün değil |
 
@@ -76,6 +76,10 @@ Detaylar: [ARCHITECTURE.md](ARCHITECTURE.md) · [EYE_CONTACT.md](EYE_CONTACT.md)
 - Düzeltmenin güvenli olup olmadığına karar veren doğrulama kapısı (kafa açısı, göz
   açıklığı, yüz boyutu) ve red sebebinin ekranda gösterilmesi
 - Deneysel göz düzeltmesi — arayüzden "⚡ Düzeltme" ile açılabiliyor, varsayılan kapalı
+- İki bakış tahmin yöntemi arasında canlı geçiş (İris / Geometri)
+- Düzeltme gücü ve debug gain kaydırıcıları
+- Davranış durum makinesi — kullanıcı başka yere bakınca düzeltme kendiliğinden çekiliyor
+- Debug katmanında düzeltme okları: iris'ten hedefe, yönü anında görmek için
 
 ## Planlanan özellikler
 

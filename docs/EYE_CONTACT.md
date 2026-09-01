@@ -6,6 +6,11 @@ buradan yeniden inşa edilebilmelidir.
 
 ---
 
+> **2026-09-01 güncellemesi:** Referans projelerin algoritmaları Swift'e port edildi ve
+> boru hattına bağlandı. Bölüm 1 artık `apps/macos/EyesOn/Core/` altındaki gerçek
+> implementasyonu anlatıyor; Bölüm 2 hâlâ yapılmamış olanları (MediaPipe, öğrenilmiş
+> warp) tarif ediyor.
+
 # BÖLÜM 1 — Mevcut implementasyon (macOS, Apple Vision)
 
 ## 1.1 Face detection + landmarks
@@ -41,9 +46,25 @@ Açık göz ≈ 0.25–0.35, kapalı/kısık < 0.12.
 
 Bu kapı iyi tasarlanmış ve korunmalıdır. **Düzeltmemek her zaman geçerli bir çıktıdır.**
 
-## 1.3 Gaze estimation
+## 1.3 Gaze estimation ✅ — iki yöntem
 
-`GazeEstimator.swift`. Göz başına:
+Artık **iki** tahmin yöntemi de implement edilmiş durumda ve arayüzden seçilebiliyor:
+
+| Yöntem | Dosya | İris gerektirir mi | Bugün kullanışlı mı |
+|---|---|---|---|
+| **A — İris offset** | `Core/IrisGazeEstimator.swift` | ✅ Evet | ⚠️ Vision'ın pupil'i zayıf olduğu için sinyal küçük |
+| **B — 3B geometri** | `Core/GazeGeometry3D.swift` | ❌ Hayır | ✅ **Evet** — gözler arası mesafeden çalışıyor |
+
+Varsayılan **B**'dir. Sebebi ekranda ölçüldü: Vision'ın pupil noktası göz merkezinden
+2–3 piksel ayrılıyor (`rawOff ≈ 0.04`), yani Yöntem A'nın girdisi neredeyse sıfır.
+Yöntem B iris'e hiç bakmaz; gözün 3B konumunu gözler arası piksel mesafesinden çıkarır.
+Detay: [2.4](#24-bakış-tahmini--yöntem-b-3b-geometri-kalibrasyon-ister).
+
+### Eski (Vision'a bağlı) yöntem — kaldırıldı
+
+`GazeEstimator.swift` artık yalnızca ekrandaki yön göstergesi için sınıflandırma yapıyor.
+Ölçüm `Core/` altına, kaynak-bağımsız `FaceGeometry` üzerine taşındı. Eski hesap
+şöyleydi (referans olarak):
 
 ```
 göz_centroid = göz landmark noktalarının ortalaması
@@ -70,42 +91,57 @@ kullanılıyor. Kafa dönükken pupil offset'i yanıltıcıdır; bu düzeltilmem
 (göz genişliği daha stabil bir ölçek referansıdır) ama dikey ve yatay eşiklerin farklı
 olması bunu telafi etmeye çalışıyor gibi görünüyor. **TODO: verify.**
 
-## 1.4 Temporal smoothing
+## 1.4 Temporal smoothing ✅
 
-`GazeSmoother` — son 6 karenin **mod'u** (en sık görülen yön). Ayrık etiketler için
-makul, ancak:
+`Core/EMAFilter.swift` — `FaceGeometrySmoother` tüm landmark noktalarını, iris
+merkezlerini ve kafa açılarını EMA ile yumuşatıyor (α = 0.6), **bakış tahmininden önce**,
+böylece bütün alt hesaplar kararlılığı miras alıyor. Blend faktörü ayrıca α = 0.3 ile
+yumuşatılıyor.
 
-- Yalnızca UI etiketi için uygulanıyor; düzeltme ham `rawOffset`'i kullanıyor
-- Sürekli değerler için mod filtresi uygun değil — EMA gerekir
-- Fade / geçiş yok: düzeltme eşiği geçince **birden** açılıp kapanıyor
+Takip kaybolduğunda veya doğrulama kapısı reddettiğinde `pipeline.reset()` çağrılıyor —
+boşluk üzerinden harmanlama yapılmıyor.
 
-## 1.5 Eye correction
+`GazeSmoother` (6 karelik mod filtresi) yalnızca ekrandaki yön göstergesi için kaldı.
 
-`EyeCorrectionProcessor.swift` + `GaussianEyeWarp.metal`.
+## 1.4b Davranış durum makinesi ✅
 
-Koşullar: `correctionEnabled && validation.isSafe && direction != .center`.
-**`correctionEnabled` varsayılan `false`** — arayüzdeki "⚡ Düzeltme" düğmesiyle açılıyor.
+`Core/BehaviorFSM.swift` — referanstan birebir port. 4 durum, histerezis (15°/25°),
+kafa açısı zorlaması (yaw 20°, pitch 15°), 0.4 sn sönme / 0.2 sn doğma. Çıktısı
+`blend ∈ [0,1]`.
 
-Metal `CIWarpKernel` — her çıktı pikseli için kaynak koordinatı döndürür:
+**Mimari karar:** FSM'i her zaman **Yöntem A'nın** bakış açısı besler, düzeltme vektörü
+Yöntem B'den gelse bile. Sebebi: FSM'in bilmesi gereken şey "kullanıcı kameradan ne kadar
+uzağa bakıyor"dur ve bunu yalnızca iris söyleyebilir. Yöntem B'nin açısı ekrana bakan
+biri için sabite yakındır ve "notlarına baktı" durumunu hiç göremez.
+
+## 1.5 Eye correction ✅
+
+`Core/GazePipeline.swift` (politika) + `EyeWarpKernel.swift` (uygulama) +
+`GaussianEyeWarp.metal` (GPU).
+
+**`correctionEnabled` hâlâ varsayılan `false`** — arayüzdeki "⚡ Düzeltme" ile açılıyor.
+
+Kernel artık iki nokta yerine **hazır bir deplasman vektörü** alıyor; tüm politika
+(clamp, güç, blend) CPU'da karara bağlanıp GPU'ya pişmiş halde gidiyor:
 
 ```
-ağırlık = exp(−‖p − göz_merkezi‖² / (2σ²)) × güç
-kaynak  = p + (pupil_merkezi − göz_merkezi) × ağırlık
+ağırlık = exp(−‖p − merkez‖² / (2σ²))
+kaynak  = p + deplasman × ağırlık
 ```
 
-| Sabit | Değer |
-|---|---|
-| `correctionStrength` | 0.90 |
-| `maxPixelShift` | 20.0 px |
-| `sigmaFraction` | 0.45 (σ = göz genişliği × 0.45) |
-| ROI genişletme | σ × 5 |
+`merkez` = iris'in **varması gereken** yer, `deplasman` = −kayma. Merkezde ağırlık 1 →
+iris'in şu anki konumundan örneklenir, yani iris hedefe taşınır.
 
-Fikir doğru: göz merkezinde ağırlık ≈ güç → pupil'den örneklenir, iris ortaya gelir.
-Köşelerde ağırlık ≈ 0 → göz dış hatları sabit kalır. Aradaki Gaussian sönümleme gerçek
-bir göz dönüşünü taklit eder.
+| Sabit | Değer | Not |
+|---|---|---|
+| Varsayılan güç | 0.70 | Referanstan; 1.0 çoğu yüzde yapay görünür |
+| Maks. kayma | göz genişliği × 0.35 | Sabit 20 px yerine ölçek-bağımsız |
+| σ | göz genişliği × 0.45 | |
+| ROI | göz kutusu + 2.5σ | Dikişsiz kırpma sınırı |
 
-Metal kütüphanesi yüklenemezse CPU fallback'i var (basit piksel kaydırma +
-`CIBlendWithMask`), ancak yorumunun kendisi "hayalet iris bırakır" diyor.
+Metal kütüphanesi yüklenemezse düzeltme sessizce atlanır (kare olduğu gibi geçer).
+Eski CPU fallback'i kaldırıldı: kendi yorumunun da söylediği gibi "hayalet iris"
+bırakıyordu ve doğallık önceliğimizle çelişiyordu.
 
 ---
 
@@ -113,36 +149,51 @@ Metal kütüphanesi yüklenemezse CPU fallback'i var (basit piksel kaydırma +
 
 Aşağıdakiler **kodda doğrulanmış** gözlemlerdir; tahmin değildir.
 
-### P1 — `maxPixelShift` Metal yolunda hiç uygulanmıyor
-`EyeCorrectionProcessor.warpEye` içinde `dispX`/`dispY` hesaplanıp 20 piksele clamp
-ediliyor, ama Metal yoluna **bu clamp'lenmiş değerler gönderilmiyor** — kernel'e ham
-`pupilCenter` ve `eyeCenter` geçiliyor ve fark GPU'da yeniden hesaplanıyor. Sonuç:
-20 piksel tavanı yalnızca hiç kullanılmayan CPU fallback'inde geçerli. Yüz kameraya
-yakınken deplasman sınırsız büyüyebilir. **Gerçek bug.**
+### ~~P1 — `maxPixelShift` Metal yolunda hiç uygulanmıyor~~ ✅ ÇÖZÜLDÜ (2026-09-01)
+Eski kodda `dispX`/`dispY` hesaplanıp 20 piksele clamp ediliyor ama Metal yoluna
+gönderilmiyordu; kernel farkı GPU'da yeniden hesaplıyordu, yani tavan hiç uygulanmıyordu.
 
-### P2 — Warp her göz için tüm kareye uygulanıyor
-`correct()` sol ve sağ göz için `warpEye`'ı ayrı ayrı çağırıyor; her çağrı
-`image.extent` genişliğinde bir `CIWarpKernel` işlemi kuruyor. `roiCallback` örnekleme
-alanını daraltıyor ama iki tam kare geçişi yine de gereksiz. Göz ROI'sine kırpıp geri
-kompozit etmek çok daha ucuz.
+Çözüm: kernel artık iki nokta değil **hazır bir deplasman vektörü** alıyor
+(`GaussianEyeWarp.metal`). Clamp `GazePipeline.makeWarp` içinde yapılıyor ve GPU'ya
+clamp'lenmiş değer gidiyor. Ayrıca tavan sabit 20 px yerine **göz genişliğinin %35'i** —
+çözünürlükten ve kameraya uzaklıktan bağımsız.
 
-### P3 — Koordinat matematiği iki yerde
-`EyeCorrectionProcessor` kendi private dönüşüm yardımcılarını kullanıyor
-(`eyeCentroid`, `pixelRect`, `pupilPixelCenter`) — `VisionCoordinateMapper` varken.
-Aynı matematiğin iki kopyası, sessizce ayrışma riski.
+### ~~P2 — Warp her göz için tüm kareye uygulanıyor~~ ✅ ÇÖZÜLDÜ (2026-09-01)
+`EyeWarpKernel.apply(to:warp:)` artık kernel'i yalnızca `warp.roi` üzerinde çalıştırıp
+sonucu `composited(over:)` ile kareye geri koyuyor. ROI, göz sınırlayıcı kutusunun
+**2.5σ** genişletilmişi; o mesafede Gaussian ağırlığı ~%4 olduğu için kırpma sınırı
+dikiş bırakmıyor. İki tam kare GPU geçişi ortadan kalktı.
 
-### P4 — Açık/kapalı titremesi
-Düzeltme yalnızca `direction != .center` iken devrede. Ayrık bir eşik; kullanıcı eşiğin
-kenarında dururken düzeltme kare kare açılıp kapanır. Çözüm: davranış FSM'i + fade.
+### ~~P3 — Koordinat matematiği iki yerde~~ ✅ ÇÖZÜLDÜ (2026-09-01)
+Vision → piksel dönüşümlerinin tamamı artık tek bir yerde: `VisionFaceAdapter`, ve o da
+`VisionCoordinateMapper`'ı kullanıyor. `EyeCorrectionProcessor` artık hiç koordinat
+matematiği içermiyor — yalnızca hazır bir `CorrectionPlan`'ı uyguluyor.
 
-### P5 — Head pose bakış hesabına girmiyor
-Yaw/pitch yalnızca kapı olarak kullanılıyor. Kafa 15° dönükken pupil offset'i farklı
-yorumlanmalı; şu an yorumlanmıyor.
+### ~~P4 — Açık/kapalı titremesi~~ ✅ ÇÖZÜLDÜ (2026-09-01)
+Ayrık `direction != .center` eşiği kaldırıldı. Düzeltme artık sürekli:
+davranış FSM'i `blend ∈ [0,1]` üretiyor, blend EMA ile yumuşatılıyor, ve deplasman
+`güç × gain × blend` ile ölçekleniyor. Bakış merkezdeyken düzeltme vektörünün kendisi
+zaten ~0 olduğu için ayrı bir eşiğe gerek yok.
 
-### P6 — Aynalama ve koordinat ekseni doğrulanmadı
-Ön kamera aynalaması ayarlanmamış, Vision orientation `.up`. "Sol"/"Sağ" etiketlerinin
-gerçekten doğru yönü gösterip göstermediği **gözle doğrulanmadı**. Düzeltme yanlış yöne
-gidiyorsa ilk bakılacak yer burasıdır — ve bu, ADR-001'in çözmeyeceği bir problemdir.
+### P5 — Head pose bakış *vektörüne* hâlâ girmiyor — kısmen ele alındı
+Yaw/pitch artık davranış FSM'ini besliyor (kafa 20°/15°'yi aşınca düzeltme anında
+çekiliyor). Ancak düzeltme **vektörünün** hesabına hâlâ girmiyor: kafa 15° dönükken
+iris offset'i farklı yorumlanmalı, şu an yorumlanmıyor. MediaPipe'tan sonra ele alınacak.
+
+### P6 — Aynalama ve koordinat ekseni doğrulanmadı — AÇIK
+Ön kamera aynalaması ayarlanmamış, Vision orientation `.up`. Düzeltme yanlış yöne
+gidiyorsa ilk bakılacak yer burasıdır ve bu, ADR-001'in çözmeyeceği bir problemdir.
+
+Artık teşhisi kolay: debug katmanı her göz için **iris'ten hedefe pembe bir ok** çiziyor.
+Ok yukarıyı gösteriyorsa dikey yön doğru. Yatay yön için `GazeGeometry3D.Calibration`
+içinde `invertHorizontal` bayrağı var (varsayılan `false`, **doğrulanmadı**).
+
+### P7 — Yöntem B'nin yatay işaret yönü doğrulanmadı — AÇIK
+3B geometri yönteminin dikey işareti fizikten türetildi ve gerekçesi kodda yazılı
+(pozitif açı = bakışı yukarı çevir). **Yatay işaret aynı güvenle türetilmedi** —
+referans projenin x ekseni görüntü-soluna bakıyor gibi görünüyor. Kamera genelde yatayda
+ortalı olduğu için (`cameraOffset.x = 0`) yatay düzeltme küçük kalıyor, bu yüzden acil
+değil; ama gözle doğrulanmalı.
 
 ---
 

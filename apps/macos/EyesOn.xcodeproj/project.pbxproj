@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1D5374EC11B15B3EC79ECAD4 /* onnxruntime in Frameworks */ = {isa = PBXBuildFile; productRef = BD3EA9CFB53C2A81945908E3 /* onnxruntime */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		8227060C2FA7689C009146DE /* EyesOn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EyesOn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D5374EC11B15B3EC79ECAD4 /* onnxruntime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = EyesOn;
 			packageProductDependencies = (
+				BD3EA9CFB53C2A81945908E3 /* onnxruntime */,
 			);
 			productName = EyesOn;
 			productReference = 8227060C2FA7689C009146DE /* EyesOn.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 822706032FA7689B009146DE;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				9BE2144F7F5EC96F115014EE /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8227060D2FA7689C009146DE /* Products */;
 			projectDirPath = "";
@@ -335,6 +344,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9BE2144F7F5EC96F115014EE /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/microsoft/onnxruntime-swift-package-manager";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.24.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BD3EA9CFB53C2A81945908E3 /* onnxruntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9BE2144F7F5EC96F115014EE /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */;
+			productName = onnxruntime;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 822706042FA7689C009146DE /* Project object */;
 }
