@@ -16,7 +16,7 @@ kalitesinden önce yaparsak, kötü görünen bir düzeltmeyi Zoom içinde debug
 | 4 | Göz düzeltme kalitesi | macOS | 🟡 Bug'lar kapandı, kalite karşılaştırması kaldı |
 | 5 | Virtual Camera | macOS | ⬜ |
 | 6 | Paketleme ve dağıtım | macOS | ⬜ |
-| 7 | Öğrenilmiş warp modeli (DeepWarp) | Platform bağımsız | 🔵 **Aktif** — ağırlıklar elde |
+| 7 | Öğrenilmiş warp modeli (DeepWarp) | Platform bağımsız | 🟡 **Entegre edildi** — görsel/performans değerlendirmesi kaldı |
 | 8 | Windows | Windows | ⬜ |
 | 9 | iOS / iPadOS | Apple mobil | ⬜ |
 | 10 | Android (telefon + tablet) | Android | ⬜ |
@@ -179,8 +179,8 @@ bundan faydalanır.
       5.9 MB → `models/deepwarp/weights/warping_model/flx/12/{L,R}`)
 - [ ] TF1 checkpoint → ONNX dönüşümü; `spatial_transform` katmanını **sayısal olarak** doğrula
 - [x] ~~ONNX → CoreML dönüşümü~~ **gerekmiyor** — ONNX Runtime ADR-002 ile projede mevcut
-- [ ] Anchor map üretimini Swift'te uygula
-- [ ] Warp aşamasını değiştir; geometrik warp'ı fallback olarak koru
+- [x] Anchor map üretimini Swift'te uygula ✅ EXP-008
+- [x] Warp aşamasını değiştir; geometrik warp'ı fallback olarak koru ✅ EXP-008
 - [ ] Aynı test videolarında geometrik vs öğrenilmiş karşılaştırması →
       `.ai/EXPERIMENTS.md`
 - [ ] Performans bütçesini yeniden ölç

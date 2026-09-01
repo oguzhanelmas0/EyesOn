@@ -315,3 +315,54 @@ karşılaştırma yapılmalı (docs/MODEL_PIPELINE.md'deki "export zincirini boz
 Swift entegrasyonu: 48×64 göz kırpması + 12 kanallı anchor map üretimi + açının
 modele bağlanması. Model girdileri iris landmark'ı **istemiyor**; 6 göz kontur noktası
 ve gözler arası mesafe yeterli.
+
+
+---
+
+## EXP-008 — DeepWarp Swift entegrasyonu ve "beyaz göz" hatası
+
+**Date:** 2026-09-01 · **Agent:** Claude (Opus 5) · **Sonuç: Çalışıyor (kalite değerlendirmesi kullanıcıda)**
+
+### Yapılan
+`Core/DeepWarpModel.swift` — ONNX Runtime üzerinden L/R model oturumları. Referanstan
+port edilenler:
+- **Kırpma geometrisi** (`_extract_single_eye`): göz genişliğinin 3/4'ü yarı-genişlik,
+  1.5× yükseklik, merkeze göre asimetrik (7/12 üst, 5/12 alt) — üst göz kapağını ve
+  kaş gölgesini içine alsın diye
+- **Anchor map**: 6 göz noktası × (Δx, Δy) = 12 kanal; sıra L için `[3,2,1,0,5,4]`,
+  R için `[0,1,2,3,4,5]`
+- Referans OpenCV'nin y-aşağı uzayında; port y-yukarı CIImage uzayında, satır
+  sıralaması çevriliyor
+
+`EyeGeometry`'ye `anchorPoints` eklendi; iki adaptör de dolduruyor (MediaPipe doğrudan
+indekslerden, Vision konturu 6'ya yeniden örnekleyerek). Model çıktısı mevcut kontur
+maskesinden geçiyor — göz kapakları yine sabit.
+
+### Hata: gözün üstünde beyaz leke
+
+İlk canlı testte DeepWarp modu gözün üzerine **beyaz bir leke** bastı.
+
+**Kök neden:** Gain kaydırıcısı (debug amaçlı, 12×'e kadar) modele giden **açıyı** da
+çarpıyordu. Model *fiziksel* bir açıya (derece) duyarlı; 19° × 0.88 × 12 ≈ 200° gibi bir
+değer eğitim aralığının çok dışında. Bu durumda ağın ışık düzeltme modülü (LCM) beyaz
+palete doğru doyuyor — `çıktı = warp × w_görüntü + beyaz × w_palet` formülünde
+`w_palet → 1`. Yani beyaz leke, modelin bozulması değil, **aralık dışı girdiye verdiği
+öngörülebilir tepki**.
+
+**Çözüm:**
+1. `gain` model yolundan çıkarıldı — piksel warp'ının debug çarpanıydı, modele anlamsız
+2. Açı `CorrectionConfig.maxModelAngleDeg = 30°` ile clamp'lendi (gerçek ekran-kamera
+   geometrisi zaten ±30° içinde kalır; clamp yalnızca bozuk girdiyi yakalar)
+
+Düzeltmeden sonra: beyaz leke yok, yüz doğal, artefakt görünmüyor (Güç 0.70, Gain 1.0×).
+
+### Ders
+Model yolu ile piksel warp yolu **farklı birimlerde** çalışıyor: biri derece, diğeri
+piksel. Piksel yolu için tasarlanmış bir çarpanı model yoluna uygulamak sessiz bir
+birim hatasıydı. Yeni bir düzeltme yöntemi eklenirken hangi parametrenin hangi yola
+ait olduğu açıkça ayrılmalı.
+
+### Sıradaki
+Kullanıcı değerlendirmesi: yana bakışta iris gerçekten kameraya dönüyor mu, hayalet var
+mı, videoda titreme var mı. Ölçüm de yapılmadı — DeepWarp'ın kare başına maliyeti
+(iki ONNX çıkarımı) `docs/PERFORMANCE.md`'ye işlenmeli.

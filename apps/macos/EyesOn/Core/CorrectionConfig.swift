@@ -87,6 +87,14 @@ enum CorrectionConfig {
     /// y = −21 means "camera sits 21 cm above the screen centre" — a typical laptop.
     static let defaultCameraOffsetCm = CameraOffset(x: 0, y: -21, z: -1)
 
+    /// Hard limit on the redirection angle handed to DeepWarp, in degrees.
+    ///
+    /// The model is a function of a *physical* angle and was trained over a modest
+    /// range. Push it well past that and the light-correction module saturates toward
+    /// its white palette, painting a white blob over the eye. Real screen-to-camera
+    /// geometry stays inside ±30°, so this only ever catches bad input.
+    static let maxModelAngleDeg: CGFloat = 30.0
+
     /// Human eyeball radius. Used to convert a gaze angle into an on-image
     /// iris displacement: shift ≈ radius × sin(angle).
     static let eyeballRadiusCm: CGFloat = 1.2

@@ -12,6 +12,10 @@ enum GazeMethod: String, CaseIterable, Identifiable {
     /// distance from the *current* iris position to that target, so a sideways glance
     /// is pulled all the way back. This is the product behaviour.
     case geometry3D
+    /// DeepWarp: a trained network synthesises the redirected eye instead of moving
+    /// pixels around. Clears the ceiling the two geometric methods share, because it
+    /// can invent the sclera that should appear where the iris used to be.
+    case deepWarp
 
     var id: String { rawValue }
 
@@ -19,8 +23,12 @@ enum GazeMethod: String, CaseIterable, Identifiable {
         switch self {
         case .irisOffset: "İris"
         case .geometry3D: "Geometri"
+        case .deepWarp:   "DeepWarp"
         }
     }
+
+    /// True when the model runs the correction rather than a pixel warp.
+    var usesModel: Bool { self == .deepWarp }
 }
 
 /// A ready-to-apply warp for one eye, in CIImage pixel space.
@@ -56,8 +64,20 @@ struct CorrectionPlan {
     let appliedShift: CGPoint
     let direction: GazeDirection
 
+    /// Set when the DeepWarp path is selected: the per-eye geometry the model needs,
+    /// plus the redirection angle in degrees (vertical, horizontal).
+    let modelInput: ModelInput?
+
+    struct ModelInput {
+        let leftEye: EyeGeometry
+        let rightEye: EyeGeometry
+        /// (vertical, horizontal) degrees, already scaled by strength × blend.
+        let angleDeg: CGPoint
+    }
+
     var isCorrecting: Bool {
-        blend > 0.01 && (abs(appliedShift.x) > 0.3 || abs(appliedShift.y) > 0.3)
+        if modelInput != nil { return blend > 0.01 }
+        return blend > 0.01 && (abs(appliedShift.x) > 0.3 || abs(appliedShift.y) > 0.3)
     }
 }
 
@@ -113,12 +133,44 @@ final class GazePipeline {
         //    from where the iris actually is right now. This is what makes a sideways
         //    glance come back to the camera instead of being ignored.
         let scale = strength * gain * CGFloat(blend)
-        let left  = makeWarp(eye: face.leftEye,
+
+        // DeepWarp replaces the pixel warp entirely: the model receives the eye
+        // geometry and the redirection angle, and synthesises the corrected eye.
+        var modelInput: CorrectionPlan.ModelInput?
+        var left: EyeWarp?
+        var right: EyeWarp?
+
+        if method.usesModel,
+           let geo = geometry,
+           face.leftEye.anchorPoints.count == DeepWarpModel.anchorCount,
+           face.rightEye.anchorPoints.count == DeepWarpModel.anchorCount {
+            // Strength and behaviour blend scale the angle, so a fading disengage
+            // smoothly reduces the redirection instead of switching it off.
+            //
+            // `gain` is deliberately excluded. It is a debug multiplier for the pixel
+            // warp; the model consumes a *physical* angle in degrees, and multiplying
+            // that by 12 pushes it far outside the trained range — the light-correction
+            // module then saturates to its white palette and paints a white blob over
+            // the eye. The clamp is a second guard on the same failure.
+            let modelScale = strength * CGFloat(blend)
+            let limit = CorrectionConfig.maxModelAngleDeg
+            func clampAngle(_ deg: Double) -> CGFloat {
+                max(-limit, min(limit, CGFloat(deg) * modelScale))
+            }
+            modelInput = CorrectionPlan.ModelInput(
+                leftEye: face.leftEye,
+                rightEye: face.rightEye,
+                angleDeg: CGPoint(x: clampAngle(geo.horizontalAngleDeg),
+                                  y: clampAngle(geo.verticalAngleDeg))
+            )
+        } else {
+            left  = makeWarp(eye: face.leftEye,
                              target: target(for: face.leftEye, geometry: geometry, method: method),
                              scale: scale)
-        let right = makeWarp(eye: face.rightEye,
+            right = makeWarp(eye: face.rightEye,
                              target: target(for: face.rightEye, geometry: geometry, method: method),
                              scale: scale)
+        }
 
         let direction = GazeEstimator.classify(
             dx: gaze.averageOffset.x,
@@ -134,7 +186,8 @@ final class GazePipeline {
             gazeInfo: gaze,
             geometry: geometry,
             appliedShift: left?.shift ?? .zero,
-            direction: direction
+            direction: direction,
+            modelInput: modelInput
         )
     }
 
@@ -150,9 +203,12 @@ final class GazePipeline {
                 y: eye.irisCenter.y
                  + (eye.center.y - eye.irisCenter.y) * CorrectionConfig.verticalDamping
             )
-        case .geometry3D:
+        case .geometry3D, .deepWarp:
             // Centroid, nudged by the camera-above-screen offset. No damping: the
             // geometric offset already encodes the natural amount of "up".
+            //
+            // `.deepWarp` only reaches here as a fallback — when the model or the
+            // anchor points are unavailable, the pipeline degrades to this warp.
             let off = geometry?.leftCorrection ?? .zero
             return CGPoint(x: eye.center.x + off.x, y: eye.center.y + off.y)
         }

@@ -16,8 +16,23 @@ import CoreGraphics
 /// project's core promise: nothing outside the eyelids can move.
 enum EyeCorrectionProcessor {
 
-    static func apply(_ plan: CorrectionPlan, to image: CIImage) -> CIImage {
+    static func apply(_ plan: CorrectionPlan,
+                      to image: CIImage,
+                      model: DeepWarpModel? = nil) -> CIImage {
         guard plan.blend > 0.001 else { return image }
+
+        // Model path: the network synthesises each eye; the same contour mask still
+        // blends it in, so eyelids and skin stay pinned to the original pixels.
+        if let input = plan.modelInput, let model {
+            var result = image
+            for (eye, side) in [(input.leftEye, EyeSide.left), (input.rightEye, EyeSide.right)] {
+                if let patch = model.correctedEye(from: image, eye: eye,
+                                                  side: side, angleDeg: input.angleDeg) {
+                    result = blend(patch: patch, eye: eye, source: image, over: result)
+                }
+            }
+            return result.cropped(to: image.extent)
+        }
 
         var result = image
         for warp in [plan.left, plan.right].compactMap({ $0 }) {
@@ -26,6 +41,26 @@ enum EyeCorrectionProcessor {
             result = correct(warp, source: image, over: result)
         }
         return result.cropped(to: image.extent)
+    }
+
+    /// Blends a model-produced eye patch through the eye-contour mask.
+    private static func blend(patch: CIImage,
+                              eye: EyeGeometry,
+                              source: CIImage,
+                              over background: CIImage) -> CIImage {
+        let roi = patch.extent.intersection(source.extent)
+        guard !roi.isNull, roi.width >= 4, roi.height >= 4 else { return background }
+
+        let feather = max(eye.width * CorrectionConfig.featherFraction, 3)
+        let dilate  = max(eye.width * CorrectionConfig.maskDilateFraction, 2)
+        guard let mask = contourMask(contour: eye.contour, roi: roi,
+                                     feather: feather, dilate: dilate)
+        else { return background }
+
+        return patch.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: background,
+            kCIInputMaskImageKey: mask
+        ]).cropped(to: background.extent)
     }
 
     private static func correct(_ warp: EyeWarp,
@@ -61,7 +96,15 @@ enum EyeCorrectionProcessor {
     /// mask holds full weight over the iris even when it sits at an eye corner —
     /// otherwise the feather band would mix the moved and original iris there.
     private static func contourMask(warp: EyeWarp, roi: CGRect) -> CIImage? {
-        guard warp.contour.count >= 3 else { return nil }
+        contourMask(contour: warp.contour, roi: roi,
+                    feather: warp.feather, dilate: warp.maskDilate)
+    }
+
+    private static func contourMask(contour: [CGPoint],
+                                    roi: CGRect,
+                                    feather: CGFloat,
+                                    dilate: CGFloat) -> CIImage? {
+        guard contour.count >= 3 else { return nil }
 
         let w = Int(roi.width.rounded(.up))
         let h = Int(roi.height.rounded(.up))
@@ -76,7 +119,7 @@ enum EyeCorrectionProcessor {
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
 
         // ROI-local coordinates; both spaces are y-up, no flip needed.
-        let local = warp.contour.map { CGPoint(x: $0.x - roi.minX, y: $0.y - roi.minY) }
+        let local = contour.map { CGPoint(x: $0.x - roi.minX, y: $0.y - roi.minY) }
         let hull = convexHull(local)
         guard hull.count >= 3 else { return nil }
 
@@ -88,8 +131,8 @@ enum EyeCorrectionProcessor {
         for (i, p) in hull.enumerated() {
             let dx = p.x - centroid.x, dy = p.y - centroid.y
             let len = max(hypot(dx, dy), 0.001)
-            let q = CGPoint(x: p.x + dx / len * warp.maskDilate,
-                            y: p.y + dy / len * warp.maskDilate)
+            let q = CGPoint(x: p.x + dx / len * dilate,
+                            y: p.y + dy / len * dilate)
             if i == 0 { ctx.move(to: q) } else { ctx.addLine(to: q) }
         }
         ctx.closePath()
@@ -98,7 +141,7 @@ enum EyeCorrectionProcessor {
         guard let cg = ctx.makeImage() else { return nil }
 
         return CIImage(cgImage: cg)
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: warp.feather])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: feather])
             .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
             .transformed(by: CGAffineTransform(translationX: roi.minX, y: roi.minY))
     }

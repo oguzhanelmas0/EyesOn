@@ -33,7 +33,7 @@ final class CameraViewModel: ObservableObject {
     @Published var correctionStrength: CGFloat = CorrectionConfig.defaultStrength
     /// Debug multiplier. Default 1.0.
     @Published var debugGain: CGFloat = 1.0
-    @Published var gazeMethod: GazeMethod = .irisOffset
+    @Published var gazeMethod: GazeMethod = .deepWarp
 
     // Debug overlay controls
     @Published var debugOverlayEnabled: Bool = true
@@ -46,6 +46,9 @@ final class CameraViewModel: ObservableObject {
     private let manager         = CameraManager()
     private let visionProcessor = VisionProcessor()
     private let pipeline        = GazePipeline()
+    /// Nil when the ONNX models are missing; the pipeline then falls back to the
+    /// geometric warp instead of losing correction entirely.
+    private lazy var deepWarp: DeepWarpModel? = DeepWarpModel(ciContext: ciContext)
     private var processingTask: Task<Void, Never>?
     private var directionSmoother = GazeSmoother(size: 6)
 
@@ -144,7 +147,8 @@ final class CameraViewModel: ObservableObject {
                 // 4. Correction
                 var displayCI = result.ciImage
                 if correctionEnabled, let framePlan {
-                    displayCI = EyeCorrectionProcessor.apply(framePlan, to: displayCI)
+                    displayCI = EyeCorrectionProcessor.apply(framePlan, to: displayCI,
+                                                             model: deepWarp)
                 }
 
                 // 5. Render

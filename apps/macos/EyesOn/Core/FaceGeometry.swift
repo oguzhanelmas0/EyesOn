@@ -22,6 +22,14 @@ struct EyeGeometry {
     let irisCenter: CGPoint
     /// Contour bounding box.
     let bounds: CGRect
+    /// The six eye landmarks DeepWarp's anchor map was trained on, already in the
+    /// order the model expects. Empty when the landmark source cannot supply them,
+    /// in which case the model path is skipped and the geometric warp is used.
+    ///
+    /// Layout follows the reference (`displayers/face_predictor.py`): index 0 and 3
+    /// are the inner/outer corners — the anchor-map code takes the eye width from
+    /// `|p[3].x - p[0].x|`.
+    let anchorPoints: [CGPoint]
 
     var width: CGFloat { bounds.width }
     var height: CGFloat { bounds.height }
@@ -55,6 +63,12 @@ struct HeadPose {
     let rollDeg: Double
 
     static let zero = HeadPose(yawDeg: 0, pitchDeg: 0, rollDeg: 0)
+}
+
+/// Which side of the face an eye belongs to, from the viewer's perspective.
+/// DeepWarp ships separate weights per side, so the model wrapper needs this.
+enum EyeSide {
+    case left, right
 }
 
 /// A detected face, independent of which landmark engine produced it.

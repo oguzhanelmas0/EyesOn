@@ -15,6 +15,15 @@ struct MediaPipeFaceAdapter {
         362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398
     ]
 
+    /// The six eye landmarks DeepWarp's anchor map expects, in model order.
+    ///
+    /// These are the MediaPipe equivalents of the dlib-68 eye points the model was
+    /// trained on (`reference/deepwarp-cam/displayers/face_predictor.py`).
+    /// Indices 0 and 3 are the inner/outer corners — the anchor-map builder derives
+    /// the eye width from them, so the order matters.
+    static let viewerLeftAnchorIndices  = [33, 160, 158, 133, 153, 144]
+    static let viewerRightAnchorIndices = [362, 385, 387, 263, 373, 380]
+
     /// Viewer-left iris indices: center 468, boundary 469, 470, 471, 472
     static let viewerLeftIrisCenterIndex = 468
     static let viewerLeftIrisIndices = [468, 469, 470, 471, 472]
@@ -42,14 +51,22 @@ struct MediaPipeFaceAdapter {
             idx < landmarks.count ? landmarks[idx].cgPoint : nil
         }
         let eyeAIrisCenter = landmarks[viewerLeftIrisCenterIndex].cgPoint
-        let eyeA = makeEyeGeometry(contour: eyeAContour, irisCenter: eyeAIrisCenter)
+        let eyeAAnchors = viewerLeftAnchorIndices.compactMap { idx in
+            idx < landmarks.count ? landmarks[idx].cgPoint : nil
+        }
+        let eyeA = makeEyeGeometry(contour: eyeAContour, irisCenter: eyeAIrisCenter,
+                                   anchorPoints: eyeAAnchors)
 
         // Build eye B (viewer-right)
         let eyeBContour = viewerRightEyeContourIndices.compactMap { idx in
             idx < landmarks.count ? landmarks[idx].cgPoint : nil
         }
         let eyeBIrisCenter = landmarks[viewerRightIrisCenterIndex].cgPoint
-        let eyeB = makeEyeGeometry(contour: eyeBContour, irisCenter: eyeBIrisCenter)
+        let eyeBAnchors = viewerRightAnchorIndices.compactMap { idx in
+            idx < landmarks.count ? landmarks[idx].cgPoint : nil
+        }
+        let eyeB = makeEyeGeometry(contour: eyeBContour, irisCenter: eyeBIrisCenter,
+                                   anchorPoints: eyeBAnchors)
 
         guard let validEyeA = eyeA, let validEyeB = eyeB else { return nil }
 
@@ -74,7 +91,9 @@ struct MediaPipeFaceAdapter {
         )
     }
 
-    private static func makeEyeGeometry(contour: [CGPoint], irisCenter: CGPoint) -> EyeGeometry? {
+    private static func makeEyeGeometry(contour: [CGPoint],
+                                        irisCenter: CGPoint,
+                                        anchorPoints: [CGPoint] = []) -> EyeGeometry? {
         guard !contour.isEmpty else { return nil }
 
         var minX = contour[0].x, maxX = contour[0].x
@@ -95,7 +114,8 @@ struct MediaPipeFaceAdapter {
             contour: contour,
             center: center,
             irisCenter: irisCenter,
-            bounds: bounds
+            bounds: bounds,
+            anchorPoints: anchorPoints
         )
     }
 

@@ -45,6 +45,18 @@ enum VisionFaceAdapter {
                             headPose: pose, imageSize: imageSize)
     }
 
+    /// Reduces an arbitrary-length eye contour to the six anchor points DeepWarp
+    /// expects, with the inner/outer corners at indices 0 and 3.
+    ///
+    /// Vision gives 6–8 contour points depending on the model revision, so this
+    /// resamples rather than assuming a fixed count.
+    private static func anchorPoints(from contour: [CGPoint]) -> [CGPoint] {
+        guard contour.count >= 6 else { return [] }
+        if contour.count == 6 { return contour }
+        let step = CGFloat(contour.count - 1) / 5.0
+        return (0..<6).map { contour[Int((CGFloat($0) * step).rounded())] }
+    }
+
     private static func makeEye(contourRegion: VNFaceLandmarkRegion2D,
                                 irisRegion: VNFaceLandmarkRegion2D?,
                                 faceBox: CGRect,
@@ -65,6 +77,11 @@ enum VisionFaceAdapter {
                            y: contour.reduce(0) { $0 + $1.y } / n)
         }
 
-        return EyeGeometry.make(contour: contour, irisCenter: iris)
+        // DeepWarp wants six points with the corners first and last. Vision returns
+        // its eye region already ordered around the contour, so the corners are the
+        // horizontal extremes; resample six points evenly between them.
+        let anchors = Self.anchorPoints(from: contour)
+
+        return EyeGeometry.make(contour: contour, irisCenter: iris, anchorPoints: anchors)
     }
 }

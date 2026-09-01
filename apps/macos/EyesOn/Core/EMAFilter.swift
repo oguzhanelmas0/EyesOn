@@ -78,6 +78,8 @@ struct FaceGeometrySmoother {
     private var rightContour: PointsEMA
     private var leftIris: PointEMA
     private var rightIris: PointEMA
+    private var leftAnchors: PointsEMA
+    private var rightAnchors: PointsEMA
     private var yaw: ScalarEMA
     private var pitch: ScalarEMA
     private var roll: ScalarEMA
@@ -87,6 +89,8 @@ struct FaceGeometrySmoother {
         rightContour = PointsEMA(alpha: alpha)
         leftIris     = PointEMA(alpha: alpha)
         rightIris    = PointEMA(alpha: alpha)
+        leftAnchors  = PointsEMA(alpha: alpha)
+        rightAnchors = PointsEMA(alpha: alpha)
         yaw   = ScalarEMA(alpha: Double(alpha))
         pitch = ScalarEMA(alpha: Double(alpha))
         roll  = ScalarEMA(alpha: Double(alpha))
@@ -95,12 +99,14 @@ struct FaceGeometrySmoother {
     mutating func smooth(_ face: FaceGeometry) -> FaceGeometry {
         let l = EyeGeometry.make(
             contour: leftContour.update(face.leftEye.contour),
-            irisCenter: leftIris.update(face.leftEye.irisCenter)
+            irisCenter: leftIris.update(face.leftEye.irisCenter),
+            anchorPoints: leftAnchors.update(face.leftEye.anchorPoints)
         ) ?? face.leftEye
 
         let r = EyeGeometry.make(
             contour: rightContour.update(face.rightEye.contour),
-            irisCenter: rightIris.update(face.rightEye.irisCenter)
+            irisCenter: rightIris.update(face.rightEye.irisCenter),
+            anchorPoints: rightAnchors.update(face.rightEye.anchorPoints)
         ) ?? face.rightEye
 
         let pose = HeadPose(
@@ -115,13 +121,16 @@ struct FaceGeometrySmoother {
     mutating func reset() {
         leftContour.reset(); rightContour.reset()
         leftIris.reset();    rightIris.reset()
+        leftAnchors.reset(); rightAnchors.reset()
         yaw.reset();         pitch.reset();       roll.reset()
     }
 }
 
 extension EyeGeometry {
     /// Builds an eye from a contour, deriving centroid and bounds.
-    static func make(contour: [CGPoint], irisCenter: CGPoint) -> EyeGeometry? {
+    static func make(contour: [CGPoint],
+                     irisCenter: CGPoint,
+                     anchorPoints: [CGPoint] = []) -> EyeGeometry? {
         guard !contour.isEmpty else { return nil }
         let n = CGFloat(contour.count)
         let center = CGPoint(x: contour.reduce(0) { $0 + $1.x } / n,
@@ -131,6 +140,7 @@ extension EyeGeometry {
               let minY = ys.min(), let maxY = ys.max() else { return nil }
         let bounds = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
         return EyeGeometry(contour: contour, center: center,
-                           irisCenter: irisCenter, bounds: bounds)
+                           irisCenter: irisCenter, bounds: bounds,
+                           anchorPoints: anchorPoints)
     }
 }

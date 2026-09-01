@@ -126,7 +126,7 @@ struct ContentView: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(width: 150)
+        .frame(width: 210)
         .controlSize(.mini)
     }
 
