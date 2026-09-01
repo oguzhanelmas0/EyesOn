@@ -289,3 +289,44 @@ quality) için pazarlık konusu değildir.
 - `EyeWarp` artık göz konturunu ve feather yarıçapını taşıyor
 - Feather ve dilate, sabit piksel yerine göz genişliğinin oranı (%22 / %12) — mesafeden
   bağımsız
+
+
+---
+
+## ADR-010 — Sıradaki kalite adımı: DeepWarp modeli (MVP 7), maske iyileştirmesi değil
+
+**Status:** Accepted · 2026-09-01
+
+### Context
+İki bağımsız gözlem aynı tavanı gösterdi: kullanıcı canlı testte, Gemini/Antigravity de
+analizinde, gain yükseltilince **iris'te çift görüntü/bulanıklık** olduğunu saptadı.
+EXP-005'te maske + rijit taşımaya geçilmiş, hayalet azalmış ama tavan kalkmamıştı.
+
+Alternatif olarak "daha iyi maske + radyal deformasyon" (MVP 3 cilası) önerildi.
+
+### Decision
+Sıradaki iş **MVP 7 — DeepWarp modelinin entegrasyonu**. Maske/warp cilası yapılmayacak.
+
+### Reason
+2D piksel bükmenin sorunu maskeleme değil, **bilgi eksikliği**: iris kenara kaydığında
+arkasında görünmesi gereken sklera dokusu karede hiç yok. Hiçbir maske veya deformasyon
+profili var olmayan pikseli üretemez — ancak öğrenilmiş bir model sentezleyebilir.
+DeepWarp tam bunun için eğitilmiş (akış alanı + ışık düzeltme modülü).
+
+Üç şey bu adımı bugün mümkün kılıyor:
+1. **Ağırlıklar elimizde** (EXP-006) — `models/deepwarp/weights/warping_model/flx/12/{L,R}`
+2. **ONNX Runtime zaten projede** (ADR-002) — CoreML dönüşümüne gerek yok, TF1 → ONNX yeter
+3. **Model iris landmark'ı istemiyor** — girdileri: 48×64 göz kırpması, 6 göz kontur
+   noktasından üretilen 12 kanallı anchor map, ve gözler arası mesafeden hesaplanan
+   düzeltme açısı. Yani mevcut `GazeGeometry3D` ve göz konturlarıyla doğrudan besleniyor.
+
+### Alternatives
+- *MVP 3 cilası (maske/radyal deformasyon)* — aynı tavana çarpar, zaman kaybı
+- *MVP 5 sanal kamera önce* — ürünü görünür kılar ama kötü görüntüyü Zoom'a taşır;
+  kalite döngüsü çok yavaşlar
+
+### Consequences
+- Risk TF1 checkpoint → ONNX dönüşümünde, özellikle `spatial_transform.py`'daki özel
+  bilinear örnekleme katmanında. **Bu yüzden ilk adım Swift'e dokunmadan Python'da
+  sayısal doğrulama** (aynı girdi → TF ve ONNX çıktıları karşılaştırılır).
+- Geometrik warp fallback olarak korunur; model yüklenemezse ona düşülür.

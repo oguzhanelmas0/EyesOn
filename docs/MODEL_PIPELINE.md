@@ -4,19 +4,21 @@
 
 | Component | Model | Runtime | Input | Output | Device |
 |---|---|---|---|---|---|
-| Face detection | Apple Vision (dahili, sürüm açıklanmaz) | Vision.framework | `CVPixelBuffer` | `[VNFaceObservation]` | Apple tarafından yönetilir (CPU/GPU/ANE) |
-| Face landmarks | Apple Vision `VNDetectFaceLandmarksRequest` | Vision.framework | `CVPixelBuffer` + face box | `VNFaceLandmarks2D` (göz, pupil, kaş, ağız…) | Apple tarafından yönetilir |
+| Face detection | Apple Vision (dahili) | Vision.framework | `CVPixelBuffer` | `[VNFaceObservation]` | Apple yönetir (CPU/GPU/ANE) |
+| **Face landmarks** | **MediaPipe Face Landmarker** | **ONNX Runtime** | 256×256 yüz kırpması | **478 3B nokta (iris dahil)** | CPU (2 thread) |
+| Face landmarks (yedek) | Apple Vision `VNDetectFaceLandmarksRequest` | Vision.framework | `CVPixelBuffer` + face box | `VNFaceLandmarks2D` | Apple yönetir |
 | Head pose | Apple Vision (`observation.yaw`, `.pitch`) | Vision.framework | — | radyan | — |
 | Gaze estimation | **Model yok** — geometrik hesap | Swift | landmarks | `GazeEstimate` | CPU |
 | Eye correction | **Model yok** — Metal shader | Metal / Core Image | `CIImage` | `CIImage` | GPU |
 | Segmentation | Yok | — | — | — | — |
 
-**Özet: bugün projede hiçbir özel ML modeli yoktur.** Tek ML bileşeni Apple Vision'ın
-kapalı kutu modelleridir. `models/` klasörü boştur.
+**Güncel durum (2026-09-01):** Proje artık ONNX Runtime çalıştırıyor.
+`models/face_landmarks_detector.onnx` MediaPipe Face Landmarker'ı sağlıyor
+(`Vision/ONNXFaceLandmarker.swift` → `Core/MediaPipeFaceAdapter.swift`).
 
-Bunun sonucu: **model export zinciri yoktur.** PyTorch, ONNX, TensorRT, CoreML —
-hiçbiri kullanılmıyor. `Examples/EyesOnAI` içinde bir venv vardı (torch + coremltools)
-ama proje kodu hiç yazılmamıştı ve o klasör silinecek.
+Göz düzeltme modeli (DeepWarp) henüz boru hattında değil, ama **ağırlıkları elimizde**:
+`models/deepwarp/weights/warping_model/flx/12/{L,R}` — sol/sağ göz için ayrı TF1
+checkpoint'leri, toplam ~6 MB.
 
 ## Planlanan modeller
 
@@ -51,13 +53,13 @@ Mimari detayı: [EYE_CONTACT.md](EYE_CONTACT.md#28-öğrenilmiş-warp--deepwarp-
 ## Planlanan export zinciri (MVP 7)
 
 ```
-TF1 checkpoint  ──►  ONNX  ──┬──►  CoreML          (macOS, iOS/iPadOS)
-                             ├──►  ONNX Runtime    (Windows, DirectML/CPU)
+TF1 checkpoint  ──►  ONNX  ──┬──►  ONNX Runtime    (macOS ✅ mevcut, Windows)
+                             ├──►  CoreML          (iOS/iPadOS — ileride)
                              └──►  TFLite          (Android, NNAPI/GPU delegate)
 ```
 
-**Neden ONNX ara format:** tek dönüşüm doğrulaması, dört hedef. Alternatif olarak
-her hedef için ayrı dönüşüm yapmak dört kez doğrulama demektir.
+**macOS için CoreML adımı gerekmiyor:** ONNX Runtime ADR-002 ile zaten projede.
+Bu, MVP 7'yi tek bir dönüşüme indiriyor: TF1 → ONNX.
 
 ⚠️ Bu zincir henüz **kurulmadı ve test edilmedi.** TF1 checkpoint → ONNX dönüşümü
 `tf2onnx` ile mümkündür ama `spatial_transform.py` içindeki özel bilinear örnekleme

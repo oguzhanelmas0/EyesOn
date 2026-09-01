@@ -11,12 +11,12 @@ kalitesinden önce yaparsak, kötü görünen bir düzeltmeyi Zoom içinde debug
 |---|---|---|---|
 | 0 | Dokümantasyon + AI hafıza altyapısı | — | ✅ **Tamamlandı** |
 | 1 | Temel doğrulama + kamera I/O | macOS | ⬜ Sıradaki |
-| 2 | MediaPipe landmark entegrasyonu | macOS | ⬜ |
+| 2 | MediaPipe landmark entegrasyonu | macOS | ✅ **Tamamlandı** (ONNX Runtime, Gemini) |
 | 3 | Bakış tahmini + davranış FSM + stabilizasyon | macOS | 🟡 Büyük kısmı yapıldı |
 | 4 | Göz düzeltme kalitesi | macOS | 🟡 Bug'lar kapandı, kalite karşılaştırması kaldı |
 | 5 | Virtual Camera | macOS | ⬜ |
 | 6 | Paketleme ve dağıtım | macOS | ⬜ |
-| 7 | Öğrenilmiş warp modeli | Platform bağımsız | ⬜ |
+| 7 | Öğrenilmiş warp modeli (DeepWarp) | Platform bağımsız | 🔵 **Aktif** — ağırlıklar elde |
 | 8 | Windows | Windows | ⬜ |
 | 9 | iOS / iPadOS | Apple mobil | ⬜ |
 | 10 | Android (telefon + tablet) | Android | ⬜ |
@@ -174,9 +174,11 @@ seçildiğinde düzeltilmiş görüntü gidiyor.
 **Hedef:** Kalite sıçraması. Platform bağımsız kazanç — sonraki tüm platformlar
 bundan faydalanır.
 
-- [ ] DeepWarp ağırlıklarını bul (orijinal Releases) veya eğitim planı yap
-- [ ] TF1 checkpoint → ONNX dönüşümü; `spatial_transform` katmanını doğrula
-- [ ] ONNX → CoreML dönüşümü
+- [x] **DeepWarp ağırlıkları bulundu ve indirildi** ✅ 2026-09-01
+      (`gh release download v0.1.1 -R WangWilly/gaze-correction-cam -p weights.zip`,
+      5.9 MB → `models/deepwarp/weights/warping_model/flx/12/{L,R}`)
+- [ ] TF1 checkpoint → ONNX dönüşümü; `spatial_transform` katmanını **sayısal olarak** doğrula
+- [x] ~~ONNX → CoreML dönüşümü~~ **gerekmiyor** — ONNX Runtime ADR-002 ile projede mevcut
 - [ ] Anchor map üretimini Swift'te uygula
 - [ ] Warp aşamasını değiştir; geometrik warp'ı fallback olarak koru
 - [ ] Aynı test videolarında geometrik vs öğrenilmiş karşılaştırması →

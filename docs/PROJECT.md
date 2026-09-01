@@ -54,7 +54,7 @@ Hedef pipeline'ın her aşamasının **repository'deki gerçek durumu**:
 | 2 | Camera Capture | **Implemented** | `CameraManager.swift` — AVFoundation, 720p, AsyncStream |
 | 3 | Face Detection | **Implemented** | `VisionProcessor.swift` — Apple Vision |
 | 4 | Face Tracking | **Partial** | `VNSequenceRequestHandler` kare arası izleme sağlıyor; ayrı bir tracker yok |
-| 5 | Landmark Detection | **Implemented** | Apple Vision `VNDetectFaceLandmarksRequest`; iris yok, kaba pupil var |
+| 5 | Landmark Detection | **Implemented** | **MediaPipe 478 nokta (iris dahil), ONNX Runtime** — canlı doğrulandı; Apple Vision yedekte |
 | 6 | Head Pose | **Partial** | Vision'ın yaw/pitch/roll'u `HeadPose` olarak taşınıyor ve davranış FSM'ini besliyor. Düzeltme *vektörünün* hesabına hâlâ girmiyor (P5) |
 | 7 | Gaze Estimation | **Implemented** | İki yöntem: `IrisGazeEstimator` (iris offset) ve `GazeGeometry3D` (IPD'den 3B konum → düzeltme açısı). Arayüzden seçilebiliyor |
 | 8 | Eye Contact Correction | **Experimental** | `GazePipeline` + `GaussianEyeWarp.metal`. Clamp ve ROI kırpma düzeltildi. **Varsayılan kapalı**; yön işareti gözle doğrulanmayı bekliyor (P6/P7) |
