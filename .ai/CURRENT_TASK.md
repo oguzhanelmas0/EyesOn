@@ -30,10 +30,9 @@ Eksik: modelin kendisi henüz boru hattında değil.
 
 ## Plan
 
-- [ ] **1. Sayısal doğrulama (Swift'e dokunmadan):** TF1 checkpoint'i yükle, test göz
-      kırpmasıyla çıkarım al, referans çıktıyı kaydet
-- [ ] **2. TF1 → ONNX dönüşümü**, özellikle `spatial_transform` bilinear örnekleme
-      katmanını doğrula; aynı girdide TF ve ONNX çıktılarını sayısal karşılaştır
+- [x] **1. Sayısal doğrulama** ✅ EXP-007
+- [x] **2. TF1 → ONNX dönüşümü** ✅ EXP-007 — L: 2.1e-05, R: 3.4e-05 fark, PASS.
+      Modeller `apps/macos/EyesOn/deepwarp_{L,R}.onnx` olarak bundle'a kopyalandı.
 - [ ] **3. Swift tarafı:** 48×64 göz kırpması + 12 kanallı anchor map üretimi
 - [ ] **4.** `GazeGeometry3D` açısını modele bağla (derece cinsinden, L/R ayrı model)
 - [ ] **5.** Çıktıyı mevcut kontur maskesiyle kareye harmanla
@@ -48,8 +47,13 @@ Sabit kalacak: landmark, FSM, yumuşatma, maske
 
 ## Current Focus
 
-Adım 1–2: dönüşümün sayısal olarak doğru olduğunu Python'da kanıtlamak.
-Bu geçmeden Swift'e dokunulmayacak.
+Adım 3–5: Swift entegrasyonu. Model dosyaları bundle'da, dönüşüm doğrulandı.
+
+**Dikkat edilecek nokta:** DeepWarp'ın anchor map'i, dlib-68 eşdeğeri **6 göz noktası**
+bekliyor (MediaPipe karşılıkları: sol `[362, 385, 387, 263, 373, 380]`,
+sağ `[33, 160, 158, 133, 153, 144]`). Mevcut `MediaPipeFaceAdapter` 16 noktalı kontur
+veriyor; `EyeGeometry`'ye ayrıca bu 6 noktalık anchor dizisi eklenmeli.
+Anchor sırası L için `[3,2,1,0,5,4]`, R için `[0,1,2,3,4,5]`.
 
 ## Experiments Tried
 

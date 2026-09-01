@@ -44,8 +44,8 @@ Runtime seçenekleri ve neden henüz karar verilmediği: `.ai/DECISIONS.md` ADR-
 | Makale | Hsu et al., ACM TOMM 15(2), 2019 |
 | Girdi | 48×64×3 göz görüntüsü + 48×64×12 anchor map + 2 açı |
 | Çıktı | 48×64×3 düzeltilmiş göz |
-| Ağırlıklar | ⚠️ **Elimizde yok** — indirilmeli veya eğitilmeli |
-| Format | TF1 checkpoint (sol ve sağ göz için ayrı) |
+| Ağırlıklar | ✅ **Elimizde** — `models/deepwarp/weights/warping_model/flx/12/{L,R}` |
+| Format | TF1 checkpoint → **ONNX** (sol ve sağ göz için ayrı, ~1.05 MB) |
 | Boyut | Küçük — en geniş katman 64 kanal |
 
 Mimari detayı: [EYE_CONTACT.md](EYE_CONTACT.md#28-öğrenilmiş-warp--deepwarp-mvp-7)
@@ -61,9 +61,13 @@ TF1 checkpoint  ──►  ONNX  ──┬──►  ONNX Runtime    (macOS ✅ 
 **macOS için CoreML adımı gerekmiyor:** ONNX Runtime ADR-002 ile zaten projede.
 Bu, MVP 7'yi tek bir dönüşüme indiriyor: TF1 → ONNX.
 
-⚠️ Bu zincir henüz **kurulmadı ve test edilmedi.** TF1 checkpoint → ONNX dönüşümü
-`tf2onnx` ile mümkündür ama `spatial_transform.py` içindeki özel bilinear örnekleme
-katmanının dönüşümü doğrulanmalıdır — **TODO: verify.**
+✅ **Doğrulandı (2026-09-01, EXP-007).** TF1 → ONNX dönüşümü yapıldı ve sayısal olarak
+karşılaştırıldı: max abs fark L için 2.1e-05, R için 3.4e-05 — float32 gürültüsü
+seviyesinde. Riskli görülen `spatial_transform.py` bilinear örnekleme katmanı sorunsuz
+çevrildi.
+
+Dönüşüm betiği: `scratchpad/convert_deepwarp.py` (opset 13, `tf2onnx` 1.17.0).
+Çıktı: `models/deepwarp/onnx/deepwarp_{L,R}.onnx`, ~1.05 MB / göz.
 
 ## Kural: export zincirini bozma
 

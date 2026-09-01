@@ -261,3 +261,57 @@ MacBook Pro (Apple Silicon), macOS 26.3.1, Xcode 26.4.1.
 ### Karar
 **Keep.** MediaPipe ONNX modeli projenin birincil landmark motoru olarak kabul edildi (ADR-001 & ADR-002 tamamlandı).
 
+
+
+---
+
+## EXP-007 — DeepWarp TF1 → ONNX dönüşümü ve sayısal doğrulama
+
+**Date:** 2026-09-01 · **Agent:** Claude (Opus 5) · **Sonuç: PASS — dönüşüm sadık**
+
+### Hypothesis
+MVP 7'nin baş riski, `tf_models/gaze_corrector_v1/spatial_transform.py` içindeki **özel
+bilinear örnekleme (spatial transformer)** katmanının ONNX'e sadık çevrilememesiydi
+(docs/MODEL_PIPELINE.md'de "TODO: verify" olarak işaretliydi). Bu doğrulanmadan Swift
+tarafına zaman harcamak riskliydi.
+
+### Method
+`scratchpad/convert_deepwarp.py`:
+1. TF1 grafiğini `build_inference_graph` ile kur, checkpoint'i geri yükle
+2. Sabit tohumlu (seed=42) test girdisi: 48×64×3 görüntü, 48×64×12 anchor map,
+   açı [12.0, −8.0]
+3. TF çıkarımını al → referans çıktı
+4. `convert_variables_to_constants` ile dondur, `tf2onnx` opset 13 ile çevir
+5. ONNX Runtime ile aynı girdiyi çalıştır, sayısal karşılaştır
+
+### Hardware / Ortam
+MacBook (Apple M1), macOS 26.3.1, Python 3.11, TF 2.19.1 (v1 uyumluluk modu),
+tf2onnx 1.17.0, onnxruntime 1.29.0.
+
+### Result
+
+| Göz | TF çıktı aralığı | ONNX çıktı aralığı | max abs fark | ort. fark | Sonuç |
+|---|---|---|---|---|---|
+| L | [0.00000, 0.98505] | [0.00000, 0.98505] | 2.101e-05 | 7.328e-07 | **PASS** |
+| R | [0.00000, 0.98910] | [0.00000, 0.98910] | 3.430e-05 | 7.707e-07 | **PASS** |
+
+Eşik 1e-4 idi; fark float32 yuvarlama gürültüsü seviyesinde. Spatial transformer
+sorunsuz çevrildi.
+
+Çıktı: `models/deepwarp/onnx/deepwarp_{L,R}.onnx`, her biri ~1.05 MB.
+Uyarı (zararsız): `tf_half_pixel_for_nn` opset 13'te deprecated — coarse akışın
+upsample katmanından geliyor, çıktı doğruluğunu etkilemiyor (fark tabloda görülüyor).
+
+### Conclusion
+**MVP 7'nin en büyük teknik riski kapandı.** ONNX Runtime zaten projede olduğu için
+(ADR-002) CoreML adımı gerekmiyor; modeller doğrudan `ONNXFaceLandmarker` desenine
+benzer bir sarmalayıcıyla çalıştırılabilir.
+
+### Keep / Reject / Revisit
+**Keep.** Dönüşüm betiği saklanmalı — model güncellenirse tekrar çalıştırılıp aynı
+karşılaştırma yapılmalı (docs/MODEL_PIPELINE.md'deki "export zincirini bozma" kuralı).
+
+### Sıradaki (henüz yapılmadı)
+Swift entegrasyonu: 48×64 göz kırpması + 12 kanallı anchor map üretimi + açının
+modele bağlanması. Model girdileri iris landmark'ı **istemiyor**; 6 göz kontur noktası
+ve gözler arası mesafe yeterli.
