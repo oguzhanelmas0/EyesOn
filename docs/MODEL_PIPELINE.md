@@ -8,8 +8,9 @@
 | **Face landmarks** | **MediaPipe Face Landmarker** | **ONNX Runtime** | 256×256 yüz kırpması | **478 3B nokta (iris dahil)** | CPU (2 thread) |
 | Face landmarks (yedek) | Apple Vision `VNDetectFaceLandmarksRequest` | Vision.framework | `CVPixelBuffer` + face box | `VNFaceLandmarks2D` | Apple yönetir |
 | Head pose | Apple Vision (`observation.yaw`, `.pitch`) | Vision.framework | — | radyan | — |
-| Gaze estimation | **Model yok** — geometrik hesap | Swift | landmarks | `GazeEstimate` | CPU |
-| Eye correction | **Model yok** — Metal shader | Metal / Core Image | `CIImage` | `CIImage` | GPU |
+| Gaze estimation | **Model yok** — geometrik hesap | Swift | `FaceGeometry` | `GazeInfo` + açı | CPU |
+| **Eye correction** | **DeepWarp** (L/R ayrı) | **ONNX Runtime** | 48×64×3 + 48×64×12 + 2 | 48×64×3 | CPU |
+| Blending | Model yok — maske | Core Image | `CIImage` | `CIImage` | GPU |
 | Segmentation | Yok | — | — | — | — |
 
 **Güncel durum (2026-09-01):** Proje artık ONNX Runtime çalıştırıyor.

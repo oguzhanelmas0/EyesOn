@@ -14,17 +14,22 @@ anlatır; planlanan değişiklikler ayrıca işaretlenmiştir.
                     ↓
 3. Unwrap           CMSampleBufferGetImageBuffer → CVPixelBuffer
                     ↓
-4. Detection        VNSequenceRequestHandler.perform(orientation: .up)
-                    VNDetectFaceLandmarksRequest
-                    ↓ [VNFaceObservation]
-5. Validation       LandmarkValidator.validate(observation)
+4. Detection        ONNXFaceLandmarker → MediaPipe Face Landmarker (478 3B nokta)
+                    yedek: VNDetectFaceLandmarksRequest
+                    ↓ [Landmark3D] veya [VNFaceObservation]
+4b. Adapt           MediaPipeFaceAdapter / VisionFaceAdapter
+                    ↓ FaceGeometry (kontur, iris, 6 anchor noktası, kafa pozu)
+5. Validation       LandmarkValidator.validate(...)
                     ↓ isSafe / rejectionReason
-6. Gaze             GazeEstimator.estimate(from: observation)   ← yalnız isSafe ise
-                    ↓ GazeEstimate(direction, rawOffset)
-7. Smoothing        GazeSmoother.add(direction)  ← 6 karelik mod filtresi
-                    ↓ smoothedDirection
-8. Correction       EyeCorrectionProcessor.correct(...)
-                    ← koşullar: correctionEnabled && isSafe && direction != .center
+5b. Smoothing       FaceGeometrySmoother — landmark/iris/anchor/kafa açısı EMA (α=0.6)
+                    ↓ yumuşatılmış FaceGeometry
+6. Gaze             IrisGazeEstimator (A) + GazeGeometry3D (B)
+                    ↓ GazeInfo + GazeGeometryResult
+7. Behaviour        BehaviorFSM.update(...) → blend, sonra EMA (α=0.3)
+                    ↓ CorrectionPlan
+8. Correction       EyeCorrectionProcessor.apply(plan, to:, model:)
+                    ← DeepWarp modeli (2 ONNX çıkarımı) veya geometrik rijit taşıma
+                    ← ardından convex hull + feather maskesiyle harmanlama
                     ↓ CIImage
 9. Render           CIContext(mtlDevice:).createCGImage → NSImage
                     ↓
@@ -36,17 +41,19 @@ anlatır; planlanan değişiklikler ayrıca işaretlenmiştir.
 | Özellik | Değer | Nerede |
 |---|---|---|
 | Session preset | `.hd1280x720` | `CameraManager.setup()` |
-| Piksel formatı | **Belirtilmemiş** — `AVCaptureVideoDataOutput` varsayılanı | `CameraManager.addVideoOutput()` |
+| Piksel formatı | **`kCVPixelFormatType_32BGRA`** — açıkça sabitlendi | `CameraManager.addVideoOutput()` |
 | Hedef FPS | **Ayarlanmamış** — cihaz varsayılanı | — |
 | Vision orientation | `.up` | `VisionProcessor.process()` |
 | Renk uzayı | `CIImage(cvPixelBuffer:)` ne veriyorsa | `VisionProcessor` |
 | Aynalama (mirroring) | **Ayarlanmamış** | — |
 
-⚠️ **TODO: verify** — `videoSettings` hiç set edilmediği için macOS'un hangi piksel
-formatını verdiği koddan okunamaz. Camera Extension yazılırken (MVP 5) format sözleşmesi
-netleştirilmek zorunda. Ayrıca ön kamera aynalaması ayarlanmadığı için önizlemenin ayna
-görüntüsü mü yoksa gerçek yön mü olduğu **gözle doğrulanmalı** — bu, bakış yönü
-etiketlerinin (Sol/Sağ) doğru olup olmadığını doğrudan etkiler.
+✅ Piksel formatı artık açıkça `32BGRA`. Bırakıldığında AVFoundation kendi seçimini
+yapıyordu (tipik olarak biplanar YCbCr) ve alt katmanların hepsi tahmin yürütmek
+zorunda kalıyordu.
+
+⚠️ **Hâlâ açık:** ön kamera aynalaması ayarlanmadığı için önizlemenin ayna görüntüsü mü
+gerçek yön mü olduğu gözle doğrulanmadı — bakış yönü etiketlerini (Sol/Sağ) doğrudan
+etkiler (P6).
 
 ## Threading modeli
 

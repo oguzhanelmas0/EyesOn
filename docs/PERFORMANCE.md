@@ -43,13 +43,25 @@ bakılacak yer orasıdır (örn. her karede tam tespit yerine, aradaki karelerde
 
 ## Beklenen sıcak noktalar (mevcut kod, profillenmedi)
 
-Kod okumasına dayalı tahmin sıralaması:
+Boru hattı 2026-09-01'de büyük ölçüde değişti; artık **kare başına üç ONNX çıkarımı**
+var. Kod okumasına dayalı tahmin sıralaması:
 
-1. `VNDetectFaceLandmarksRequest` — her karede tam tespit
-2. `CIContext.createCGImage` — GPU→CPU kopyası, her karede
-3. `CIWarpKernel` — göz başına bir kez, **tüm kare genişliğinde** (bkz.
-   [EYE_CONTACT.md](EYE_CONTACT.md#p2--warp-her-göz-için-tüm-kareye-uygulanıyor))
-4. `NSImage` oluşturma + SwiftUI yeniden çizimi
+1. **MediaPipe landmark çıkarımı** — ONNX, CPU, 2 thread, her karede
+2. **DeepWarp çıkarımı ×2** — sol ve sağ göz için ayrı oturum, 48×64 girdi.
+   Ağ küçük ama iki çağrı seri çalışıyor; paralelleştirilebilir
+3. Model girdisi hazırlığı — `ciContext.render(toBitmap:)` iki kez + anchor map
+   döngüsü (48×64×6 = 18k iterasyon/göz, Swift'te düz döngü)
+4. `CIContext.createCGImage` — GPU→CPU kopyası, her karede
+5. `NSImage` + SwiftUI yeniden çizimi
+
+⚠️ **Hiçbiri ölçülmedi.** DeepWarp entegrasyonundan sonra FPS'e ne olduğu bilinmiyor.
+İlk ölçüm önceliği burada.
+
+Optimizasyon fikirleri (ölçüm öncesi, uygulanmadı):
+- İki göz çıkarımını tek batch'te birleştirmek (model `[None, …]` batch destekliyor)
+- Anchor map'i her karede yeniden üretmek yerine, göz konumu az değiştiğinde yeniden
+  kullanmak
+- Landmark'ı her karede değil, aradaki karelerde takiple çalıştırmak
 
 Not: virtual camera'ya geçildiğinde 2 ve 4 tamamen ortadan kalkabilir — çıktı doğrudan
 `CVPixelBuffer` olarak verilir. Bu tek başına anlamlı bir kazanç olabilir.

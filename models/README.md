@@ -5,8 +5,31 @@ talimatları burada tutulur.
 
 ## Şu an
 
-Klasör boş. Projede henüz özel bir ML modeli kullanılmıyor — tek ML bileşeni Apple
-Vision'ın kapalı kutu modelleridir ve o sistemle birlikte gelir.
+| Dosya | Ne | Boyut |
+|---|---|---|
+| `face_landmarks_detector.onnx` | MediaPipe Face Landmarker, 478 nokta | 4.7 MB |
+| `deepwarp/weights/warping_model/flx/12/{L,R}` | DeepWarp TF1 checkpoint'leri (kaynak) | ~6 MB |
+| `deepwarp/onnx/deepwarp_{L,R}.onnx` | Dönüştürülmüş DeepWarp modelleri | ~1.05 MB ×2 |
+
+### ⚠️ Git istisnası
+
+Uygulamanın çalışması için gereken **üç `.onnx` dosyası** `apps/macos/EyesOn/` altında
+bulunur ve **git'te izlenir** (toplam ~6.7 MB). Sebebi pratik: bunlar olmadan uygulama
+derlense de çalışmaz, ve boyutları git için sorun çıkarmayacak kadar küçük.
+
+Bu klasördeki (`models/`) her şey git dışıdır — burası kaynak checkpoint'ler ve dönüşüm
+çıktıları için çalışma alanıdır.
+
+### DeepWarp ağırlıklarını yeniden edinme
+
+```bash
+gh release download v0.1.1 -R WangWilly/gaze-correction-cam -p weights.zip
+unzip weights.zip -d models/deepwarp/
+```
+
+Dönüşüm: `scratchpad/convert_deepwarp.py` (TF 2.19.1 + tf2onnx 1.17.0, opset 13).
+Betik TF ve ONNX çıktılarını aynı girdide karşılaştırır — model güncellenirse bu
+karşılaştırma tekrar çalıştırılmalıdır (bkz. EXP-007).
 
 ## Planlanan
 

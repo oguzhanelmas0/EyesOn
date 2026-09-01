@@ -57,9 +57,9 @@ Hedef pipeline'ın her aşamasının **repository'deki gerçek durumu**:
 | 5 | Landmark Detection | **Implemented** | **MediaPipe 478 nokta (iris dahil), ONNX Runtime** — canlı doğrulandı; Apple Vision yedekte |
 | 6 | Head Pose | **Partial** | Vision'ın yaw/pitch/roll'u `HeadPose` olarak taşınıyor ve davranış FSM'ini besliyor. Düzeltme *vektörünün* hesabına hâlâ girmiyor (P5) |
 | 7 | Gaze Estimation | **Implemented** | İki yöntem: `IrisGazeEstimator` (iris offset) ve `GazeGeometry3D` (IPD'den 3B konum → düzeltme açısı). Arayüzden seçilebiliyor |
-| 8 | Eye Contact Correction | **Experimental** | `GazePipeline` + `GaussianEyeWarp.metal`. Clamp ve ROI kırpma düzeltildi. **Varsayılan kapalı**; yön işareti gözle doğrulanmayı bekliyor (P6/P7) |
+| 8 | Eye Contact Correction | **Implemented** | **DeepWarp modeli** (ONNX, L/R ayrı) varsayılan. Yedekler: geometrik rijit taşıma (İris / Geometri modları). Arayüzden üçü de seçilebiliyor |
 | 9 | Temporal Stabilization | **Implemented** | Landmark/iris/kafa açısı EMA (α=0.6), blend EMA (α=0.3), 4 durumlu davranış FSM'i, 0.4 sn/0.2 sn fade |
-| 10 | Frame Reconstruction / Blending | **Partial** | Warp göz ROI'sine kırpılıp kareye kompozit ediliyor; Gaussian sönümleme 2.5σ'da dikişi görünmez kılıyor. Convex hull maskesi henüz yok |
+| 10 | Frame Reconstruction / Blending | **Implemented** | Göz konturunun convex hull'undan Gaussian-feather'lı maske; hem model hem geometrik yol aynı maskeden geçiyor. Göz kapakları orijinale sabit |
 | 11 | Virtual Camera | **Not Implemented** | Kod yok. Çıktı yalnızca kendi SwiftUI penceresine gidiyor |
 | 12 | Zoom / Meet / Teams | **Not Implemented** | 11 olmadan mümkün değil |
 
@@ -75,8 +75,8 @@ Detaylar: [ARCHITECTURE.md](ARCHITECTURE.md) · [EYE_CONTACT.md](EYE_CONTACT.md)
 - Debug katmanları: yüz kutusu, landmark noktaları, göz ROI'si, HUD (aç/kapa düğmeleriyle)
 - Düzeltmenin güvenli olup olmadığına karar veren doğrulama kapısı (kafa açısı, göz
   açıklığı, yüz boyutu) ve red sebebinin ekranda gösterilmesi
-- Deneysel göz düzeltmesi — arayüzden "⚡ Düzeltme" ile açılabiliyor, varsayılan kapalı
-- İki bakış tahmin yöntemi arasında canlı geçiş (İris / Geometri)
+- **Öğrenilmiş göz düzeltmesi (DeepWarp)** — piksel bükmek yerine gözü sentezliyor
+- Üç düzeltme yöntemi arasında canlı geçiş: **İris / Geometri / DeepWarp**
 - Düzeltme gücü ve debug gain kaydırıcıları
 - Davranış durum makinesi — kullanıcı başka yere bakınca düzeltme kendiliğinden çekiliyor
 - Debug katmanında düzeltme okları: iris'ten hedefe, yönü anında görmek için

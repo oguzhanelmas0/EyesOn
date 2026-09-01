@@ -12,60 +12,61 @@ ayrıca işaretlenmiştir.
       ┌─────────────────────────────────────┐
       │ Capture Layer                       │  CameraManager.swift
       │ AVCaptureSession, .hd1280x720       │  AVFoundation
-      │ AsyncStream, bufferingNewest(1)     │
+      │ 32BGRA sabit, AsyncStream(newest 1) │
       └────────────────┬────────────────────┘
                        │ CMSampleBuffer
                        ↓
       ┌─────────────────────────────────────┐
-      │ Frame Processor                     │  CameraViewModel.swift
-      │ tek async döngü, kare kare          │  Combine + Swift Concurrency
+      │ Landmark Detection                  │  Vision/ONNXFaceLandmarker.swift
+      │ MediaPipe Face Landmarker, 478 pts  │  ONNX Runtime
+      │ (yedek: Apple Vision)               │  VisionProcessor.swift
       └────────────────┬────────────────────┘
-                       │ CVPixelBuffer
+                       │ [Landmark3D] → adapter
                        ↓
       ┌─────────────────────────────────────┐
-      │ Face Detector + Landmark Tracker    │  VisionProcessor.swift (actor)
-      │ VNSequenceRequestHandler            │  Apple Vision
-      │ VNDetectFaceLandmarksRequest        │
+      │ Source-agnostic geometry            │  Core/MediaPipeFaceAdapter.swift
+      │ FaceGeometry: kontur, iris, anchor  │  Core/VisionFaceAdapter.swift
       └────────────────┬────────────────────┘
-                       │ [VNFaceObservation] + CIImage
                        ↓
       ┌─────────────────────────────────────┐
       │ Validation Gate                     │  Vision/LandmarkValidator.swift
       │ yüz boyutu, EAR, yaw/pitch, IED     │
       └────────────────┬────────────────────┘
-                       │ isSafe: Bool
                        ↓
       ┌─────────────────────────────────────┐
-      │ Gaze Estimation                     │  GazeEstimator.swift
-      │ pupil − göz centroid, normalize     │
-      │ → 5 ayrık yön + sürekli offset      │
-      └────────────────┬────────────────────┘
-                       │ GazeEstimate
-                       ↓
-      ┌─────────────────────────────────────┐
-      │ Temporal Stabilizer (kısmi)         │  GazeSmoother (GazeEstimator.swift içinde)
-      │ 6 karelik mod filtresi              │  ⚠️ yalnız ayrık etiket için
+      │ Smoothing (EMA)                     │  Core/EMAFilter.swift
+      │ landmark α=0.6, blend α=0.3         │
       └────────────────┬────────────────────┘
                        ↓
       ┌─────────────────────────────────────┐
-      │ Eye Contact Correction              │  EyeCorrectionProcessor.swift
-      │ Gaussian warp                       │  EyeWarpKernel.swift
-      │ ⚠️ varsayılan KAPALI                │  GaussianEyeWarp.metal (CIWarpKernel)
-      └────────────────┬────────────────────┘
-                       │ CIImage
-                       ↓
-      ┌─────────────────────────────────────┐
-      │ Renderer                            │  CameraViewModel.render()
-      │ CIContext(mtlDevice) → CGImage      │  Core Image + Metal
-      │ → NSImage                           │
+      │ Gaze Estimation — iki yöntem        │  Core/IrisGazeEstimator.swift
+      │ A: iris offset   B: 3B geometri     │  Core/GazeGeometry3D.swift
       └────────────────┬────────────────────┘
                        ↓
       ┌─────────────────────────────────────┐
-      │ SwiftUI Window                      │  ContentView.swift + overlay'ler
+      │ Behaviour FSM                       │  Core/BehaviorFSM.swift
+      │ 4 durum, histerezis, fade → blend   │
+      └────────────────┬────────────────────┘
+                       │ CorrectionPlan
+                       ↓
+      ┌─────────────────────────────────────┐
+      │ Eye Contact Correction              │  Core/GazePipeline.swift
+      │ • DeepWarp modeli (varsayılan)      │  Core/DeepWarpModel.swift  ← ONNX
+      │ • geometrik rijit taşıma (yedek)    │  EyeCorrectionProcessor.swift
+      └────────────────┬────────────────────┘
+                       ↓
+      ┌─────────────────────────────────────┐
+      │ Masked Blending                     │  EyeCorrectionProcessor.swift
+      │ convex hull + Gaussian feather      │  Core Image
+      │ → göz kapakları orijinale sabit     │
+      └────────────────┬────────────────────┘
+                       ↓
+      ┌─────────────────────────────────────┐
+      │ Renderer → SwiftUI Window           │  CameraViewModel.render()
       │ ⚠️ SON DURAK — çıktı burada biter   │
       └─────────────────────────────────────┘
 
-              ╳ Virtual Camera — NOT IMPLEMENTED
+              ╳ Virtual Camera — NOT IMPLEMENTED (MVP 5)
               ╳ Zoom / Meet / Teams — ulaşılamıyor
 ```
 
@@ -79,9 +80,10 @@ ayrıca işaretlenmiştir.
 | Face/Landmark | `VisionProcessor.swift` (32) | `CVPixelBuffer` | `[VNFaceObservation]`, `CIImage` | Vision |
 | Validation | `Vision/LandmarkValidator.swift` (162) | `VNFaceObservation` | `LandmarkValidationResult` | Vision |
 | Gaze | `GazeEstimator.swift` (153) | `VNFaceObservation` | `GazeEstimate` (yön + offset) | Vision, CoreGraphics |
-| Correction | `EyeCorrectionProcessor.swift` (156) | `CIImage` + gaze + validation | `CIImage` | Core Image, Vision |
-| Warp kernel yükleyici | `EyeWarpKernel.swift` (64) | `default.metallib` | `CIWarpKernel` | Core Image |
-| Warp shader | `GaussianEyeWarp.metal` (33) | piksel koordinatı | kaynak koordinatı | Metal |
+| **Landmark (birincil)** | `Vision/ONNXFaceLandmarker.swift` | `CVPixelBuffer` | 478 × `Landmark3D` | ONNX Runtime |
+| Landmark (yedek) | `VisionProcessor.swift` | `CVPixelBuffer` | `[VNFaceObservation]` | Vision |
+| **Göz düzeltme modeli** | `Core/DeepWarpModel.swift` | göz kırpması + anchor + açı | 48×64×3 düzeltilmiş göz | ONNX Runtime |
+| Correction + blending | `EyeCorrectionProcessor.swift` | `CorrectionPlan` + `CIImage` | `CIImage` | Core Image |
 | Koordinat dönüşümü | `VisionCoordinateMapper.swift` (90) | normalize nokta | piksel (CIImage / view) | CoreGraphics, Vision |
 | **Sabitler** | `Core/CorrectionConfig.swift` | — | tüm eşikler | — |
 | **Geometri tipleri** | `Core/FaceGeometry.swift` | — | kaynak-bağımsız `FaceGeometry` | CoreGraphics |
@@ -96,7 +98,8 @@ ayrıca işaretlenmiştir.
 | İzin ekranı | `PermissionDeniedView.swift` (35) | — | ekran | SwiftUI |
 | App girişi | `EyesOnApp.swift` (17) | — | `WindowGroup` | SwiftUI |
 
-Toplam ~2400 satır Swift + Metal. Tek uygulama target'ı, test target'ı yok.
+Toplam ~3200 satır Swift (24 dosya). Tek uygulama target'ı, test target'ı yok.
+Metal shader'ı kaldırıldı (EXP-005) — tüm görüntü işleme Core Image ve ONNX üzerinden.
 
 `Core/` altındaki hiçbir dosya Vision'a bağımlı değildir — `VisionFaceAdapter` tek
 köprüdür. ADR-001 uygulandığında yerine bir `MediaPipeFaceAdapter` konur ve alt katmanda

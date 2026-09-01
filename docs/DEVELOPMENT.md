@@ -9,9 +9,25 @@
 | Swift | 5.0 | `SWIFT_VERSION = 5.0` |
 | git | — | Remote: `github.com/oguzhanelmas0/EyesOn` |
 
-Ek bağımlılık yok: Swift Package Manager paketi, CocoaPods veya Carthage kullanılmıyor.
-Tüm kütüphaneler Apple SDK'sından geliyor (AVFoundation, Vision, Core Image, Metal,
-SwiftUI, AppKit, Combine).
+### Bağımlılıklar
+
+| Paket | Nasıl | Ne için |
+|---|---|---|
+| `onnxruntime-swift-package-manager` | SPM (Xcode otomatik çözer) | MediaPipe landmark + DeepWarp modelleri |
+
+Geri kalan her şey Apple SDK'sından: AVFoundation, Vision, Core Image, SwiftUI,
+AppKit, Combine. İlk derlemede Xcode ONNX Runtime'ı indirir (ağ gerekir).
+
+### Model dosyaları
+
+Uygulama üç `.onnx` dosyasına ihtiyaç duyar ve bunlar repository'de mevcuttur
+(`apps/macos/EyesOn/` altında, git'te izleniyor):
+
+- `face_landmarks_detector.onnx` — MediaPipe Face Landmarker (4.7 MB)
+- `deepwarp_L.onnx`, `deepwarp_R.onnx` — göz düzeltme modeli (~1.05 MB ×2)
+
+Ayrıca ek indirme gerekmez. Kaynak checkpoint'ler ve dönüşüm için:
+[models/README.md](../models/README.md).
 
 ## Derleme ve çalıştırma
 
@@ -40,7 +56,10 @@ Arayüzdeki düğmeler:
 | □ Yüz | Yüz sınırlayıcı kutusu |
 | □ Marks | Landmark noktaları |
 | □ ROI | Göz ROI kutuları |
-| **⚡ Düzeltme** | **Göz düzeltmesini aç/kapa — varsayılan KAPALI** |
+| **⚡ Düzeltme** | Göz düzeltmesini aç/kapa (geliştirme sırasında **açık** başlar) |
+| İris / Geometri / **DeepWarp** | Düzeltme yöntemi — varsayılan **DeepWarp** |
+| Güç | Düzeltme gücü 0–1 (varsayılan 0.70) |
+| Gain | Piksel warp'ı için debug çarpanı. **DeepWarp modunda etkisizdir** (EXP-008) |
 
 Üstteki durum göstergesi düzeltmenin aktif olup olmadığını ve değilse **sebebini**
 gösterir (örn. "Kafa çok dönük (yaw 27°)").
@@ -56,14 +75,22 @@ App Sandbox açık, `com.apple.security.device.camera` entitlement'ı var.
 (Developer ID + notarization + system extension entitlement) →
 [VIRTUAL_CAMERA.md](VIRTUAL_CAMERA.md#macos--camera-extension-cmioextension)
 
-## Metal shader
+## Model yükleme sorunları
 
-`GaussianEyeWarp.metal` Xcode tarafından derlenip `default.metallib` olarak bundle'a
-konur. `EyeWarpKernel.swift` bunu çalışma zamanında `Bundle.main.url(forResource:
-"default", withExtension: "metallib")` ile yükler.
+Uygulama başlarken konsola yazar:
 
-Yüklenemezse konsola `[EyeWarpKernel] ❌ ...` yazar ve CPU fallback'ine düşer.
-**Düzeltme çalışmıyorsa ilk bakılacak yer bu konsol çıktısıdır.**
+```
+[ONNXFaceLandmarker] ✅ Initialized successfully with model: ...
+[DeepWarpModel] ✅ Loaded both eye models
+```
+
+`❌` görürsen model dosyası bundle'da değildir. Düzeltme çalışmıyorsa ilk bakılacak
+yer burasıdır. Model yüklenemezse uygulama çökmez: landmark için Apple Vision'a,
+düzeltme için geometrik warp'a düşer.
+
+⚠️ Uygulama App Sandbox içinde çalıştığı için `/tmp` gibi yerlere yazamaz ve
+`open` ile başlatıldığında `print` çıktısı terminale düşmez. Konsol çıktısını görmek
+için Xcode'dan çalıştır (⌘R).
 
 ## Klasör yapısı
 
@@ -79,7 +106,7 @@ EyesOn/
 ├── docs/                # konu bazlı teknik dokümantasyon
 ├── apps/macos/          # Xcode projesi
 ├── core/                # paylaşılan çekirdek (henüz boş)
-├── models/              # ML model dosyaları (git'e girmez)
+├── models/              # model kaynakları + dönüşüm çıktıları (git'e girmez)
 ├── reference/           # referans projeler (okumak için, MIT, derlenmez)
 └── Examples/            # GEÇİCİ, git'te yok, silinecek — REFERANS VERME
 ```

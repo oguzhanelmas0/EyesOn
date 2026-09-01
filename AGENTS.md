@@ -150,12 +150,15 @@ Repository'de bugün gerçekten mevcut olanlar:
 | Araç | Durum | Kural |
 |---|---|---|
 | Xcode / Swift | ✅ Kullanılıyor | `apps/macos/EyesOn.xcodeproj`, macOS deployment target 26.3, Swift 5.0 |
-| Apple Vision | ✅ Kullanılıyor | Şu anki landmark kaynağı; MediaPipe'a geçilecek (ADR-001) |
-| Core Image + Metal | ✅ Kullanılıyor | `GaussianEyeWarp.metal` — CIWarpKernel; `default.metallib` bundle'da olmalı |
-| AVFoundation | ✅ Kullanılıyor | Kamera yakalama |
+| **ONNX Runtime** | ✅ Kullanılıyor | SPM: `onnxruntime-swift-package-manager`. **İki modeli de bu çalıştırıyor** |
+| **MediaPipe Face Landmarker** | ✅ Kullanılıyor | 478 nokta + iris, ONNX olarak (ADR-001, ADR-002). `Vision/ONNXFaceLandmarker.swift` |
+| **DeepWarp** | ✅ Kullanılıyor | Göz düzeltme modeli, L/R ayrı ONNX (ADR-010). `Core/DeepWarpModel.swift` |
+| Apple Vision | ✅ Yedek | Yüz tespiti + landmark yedeği; `Core/VisionFaceAdapter.swift` |
+| Core Image | ✅ Kullanılıyor | Kırpma, maskeleme, harmanlama. **Metal kernel kaldırıldı** (EXP-005) |
+| AVFoundation | ✅ Kullanılıyor | Kamera yakalama, BGRA sabitlenmiş |
 | git | ✅ Var | Remote: `github.com/oguzhanelmas0/EyesOn` |
-| MediaPipe | ❌ Henüz yok | Planlı (ADR-001); macOS'ta çalıştırma yolu henüz belirsiz (ADR-002) |
-| ONNX / CoreML / PyTorch / TensorRT | ❌ Yok | Faz olarak MVP 7'de gündeme gelir |
+| TensorFlow / tf2onnx | ⚙️ Yalnız dönüşümde | DeepWarp TF1→ONNX çevirisi için; uygulamada yok (EXP-007) |
+| CoreML / PyTorch / TensorRT | ❌ Yok | macOS'ta gerekmedi — ONNX Runtime yeterli |
 | pytest / XCTest | ❌ Yok | Test target'ı yok |
 | CI | ❌ Yok | — |
 | OpenCV / ffmpeg | ❌ Yok | Yalnız `reference/` altındaki Python projelerinde (derlenmez) |
@@ -172,7 +175,9 @@ EyesOn/
 ├── docs/                → konu bazlı teknik dokümantasyon
 ├── apps/macos/          → Xcode projesi (aktif geliştirme)
 ├── core/                → platformlar arası paylaşılan çekirdek (henüz boş)
-├── models/              → ML model dosyaları (git'e girmez)
+├── models/              → model kaynakları + dönüşüm çıktıları (git'e girmez)
+│                         ⚠️ istisna: uygulamanın çalışması için gereken 3 .onnx
+│                         `apps/macos/EyesOn/` altında ve git'te izlenir (~6.7 MB)
 ├── reference/           → damıtılmış referans projeler (okumak için, MIT, derlenmez)
 └── Examples/            → GEÇİCİ, git'te yok, silinecek — REFERANS VERME
 ```

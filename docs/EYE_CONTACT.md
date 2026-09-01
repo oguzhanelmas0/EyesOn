@@ -6,25 +6,28 @@ buradan yeniden inşa edilebilmelidir.
 
 ---
 
-> **2026-09-01 güncellemesi:** Referans projelerin algoritmaları Swift'e port edildi ve
-> boru hattına bağlandı. Bölüm 1 artık `apps/macos/EyesOn/Core/` altındaki gerçek
-> implementasyonu anlatıyor; Bölüm 2 hâlâ yapılmamış olanları (MediaPipe, öğrenilmiş
-> warp) tarif ediyor.
+> **2026-09-01 (2. güncelleme):** Artık **her iki referans yaklaşımı da** implement
+> edilmiş durumda. MediaPipe landmark tespiti ve DeepWarp göz düzeltme modeli ONNX
+> Runtime üzerinden çalışıyor. Bölüm 1 gerçek implementasyonu, Bölüm 2 algoritmaların
+> tam tanımını (tek doğruluk kaynağı) anlatır.
+>
+> **Düzeltme yöntemi arayüzden seçilebilir:** `İris` · `Geometri` · `DeepWarp` (varsayılan).
 
 # BÖLÜM 1 — Mevcut implementasyon (macOS, Apple Vision)
 
-## 1.1 Face detection + landmarks
+## 1.1 Face detection + landmarks ✅ MediaPipe
 
-`VisionProcessor.swift` — `VNSequenceRequestHandler` + `VNDetectFaceLandmarksRequest`.
-Sequence handler kullanılması kare arası izleme sağlar (ayrı bir tracker yoktur).
+**Birincil:** `Vision/ONNXFaceLandmarker.swift` — MediaPipe Face Landmarker,
+**478 3B nokta**, iris dahil (468–477), ONNX Runtime ile.
+`Core/MediaPipeFaceAdapter.swift` sonucu kaynak-bağımsız `FaceGeometry`'ye çevirir.
 
-Apple Vision'ın verdiği landmark bölgeleri arasında kullandıklarımız: `leftEye`,
-`rightEye`, `leftPupil`, `rightPupil`. Ayrıca `VNFaceObservation.yaw` ve `.pitch`
-doğrudan Vision'dan gelir (radyan).
+Canlı doğrulandı: iris çemberleri göz bebeklerine milimetrik oturuyor; harici kamera
+(Continuity Camera) ile de çalışıyor.
 
-⚠️ **Kritik sınırlama:** `leftPupil` / `rightPupil` göz başına **tek ve kaba** bir nokta
-verir. MediaPipe göz başına 5 iris noktası verir. Bakış tahmini doğrudan bu noktaya
-bağlı olduğu için hassasiyet burada tavanlanıyor → ADR-001.
+**Yedek:** Apple Vision (`VisionProcessor.swift` + `Core/VisionFaceAdapter.swift`).
+⚠️ Vision'ın `leftPupil`/`rightPupil`'i göz başına tek ve kaba bir nokta verir —
+canlı ölçümde göz merkezinden yalnızca 2–3 piksel sapıyordu (EXP-001). Bu yüzden
+yedek yoldur, birincil değil.
 
 ## 1.2 Validation gate
 
@@ -114,40 +117,64 @@ Yöntem B'den gelse bile. Sebebi: FSM'in bilmesi gereken şey "kullanıcı kamer
 uzağa bakıyor"dur ve bunu yalnızca iris söyleyebilir. Yöntem B'nin açısı ekrana bakan
 biri için sabite yakındır ve "notlarına baktı" durumunu hiç göremez.
 
-## 1.5 Eye correction ✅
+## 1.5 Eye correction ✅ — üç yöntem
 
-`Core/GazePipeline.swift` (politika) + `EyeWarpKernel.swift` (uygulama) +
-`GaussianEyeWarp.metal` (GPU).
+`Core/GazePipeline.swift` politikayı belirler, `EyeCorrectionProcessor.swift` uygular.
 
-**`correctionEnabled` hâlâ varsayılan `false`** — arayüzdeki "⚡ Düzeltme" ile açılıyor.
-
-Kernel artık iki nokta yerine **hazır bir deplasman vektörü** alıyor; tüm politika
-(clamp, güç, blend) CPU'da karara bağlanıp GPU'ya pişmiş halde gidiyor:
-
-```
-ağırlık = exp(−‖p − merkez‖² / (2σ²))
-kaynak  = p + deplasman × ağırlık
-```
-
-`merkez` = iris'in **varması gereken** yer, `deplasman` = −kayma. Merkezde ağırlık 1 →
-iris'in şu anki konumundan örneklenir, yani iris hedefe taşınır.
-
-| Sabit | Değer | Not |
+| Mod | Nasıl çalışır | Dosya |
 |---|---|---|
-| Varsayılan güç | 0.70 | Referanstan; 1.0 çoğu yüzde yapay görünür |
-| Maks. kayma | göz genişliği × 0.35 | Sabit 20 px yerine ölçek-bağımsız |
-| σ | göz genişliği × 0.45 | |
-| ROI | göz kutusu + 2.5σ | Dikişsiz kırpma sınırı |
+| **DeepWarp** (varsayılan) | Öğrenilmiş model gözü **sentezler** | `Core/DeepWarpModel.swift` |
+| Geometri | İris'i, kamera geometrisinden gelen hedefe rijit taşır | `Core/GazeGeometry3D.swift` |
+| İris | İris'i göz merkezine çeker, dikey sönümlü | `Core/IrisGazeEstimator.swift` |
 
-Metal kütüphanesi yüklenemezse düzeltme sessizce atlanır (kare olduğu gibi geçer).
-Eski CPU fallback'i kaldırıldı: kendi yorumunun da söylediği gibi "hayalet iris"
-bırakıyordu ve doğallık önceliğimizle çelişiyordu.
+Üçü de aynı kontur maskesinden geçer, yani göz kapağı koruması ortaktır.
+
+### DeepWarp yolu
+
+Model girdileri (göz başına, L ve R için ayrı ağırlıklar):
+
+| Girdi | Şekil | Kaynak |
+|---|---|---|
+| Göz görüntüsü | 48×64×3, [0,1] | Asimetrik kırpma kutusu (aşağıda) |
+| Anchor map | 48×64×12 | 6 göz noktası × (Δx, Δy) |
+| Açı | 2 | `GazeGeometry3D` → (dikey, yatay) **derece** |
+
+**Kırpma kutusu** (referanstan birebir): yarı-genişlik = göz genişliği × 3/4,
+yükseklik = 1.5 × yarı-genişlik, merkeze göre asimetrik yerleşim (7/12 üst, 5/12 alt).
+Asimetri kasıtlı: üst göz kapağı ve kaş gölgesi kadraja girsin diye.
+
+⚠️ **Açıya `gain` uygulanmaz.** Model *fiziksel* bir açıya duyarlıdır; piksel warp'ının
+debug çarpanını buraya uygulamak birim hatasıdır ve modeli eğitim aralığının dışına
+iterek ışık düzeltme modülünün beyaz palete doymasına yol açar — gözün üstüne beyaz
+leke basar (EXP-008). Açı ayrıca `maxModelAngleDeg = 30°` ile clamp'lenir.
+
+### Geometrik yollar (yedek)
+
+Model veya anchor noktaları yoksa buraya düşülür. Göz içi **tek rijit parça olarak**
+taşınır (`CGAffineTransform` + `clampedToExtent`), sonra maskeyle harmanlanır.
+Rijit taşıma seçilmesinin sebebi: sönümlü bir "çekme" kernel'i, kayma iris yarıçapını
+aştığında eski iris'i yerinde bırakıp üstüne kopyasını koyuyordu — çift/hayalet iris
+(EXP-005). Rijit taşıma bijektiftir; eski iris'in yerini onunla kayan sklera doldurur.
+
+| Sabit | Değer |
+|---|---|
+| Varsayılan güç | 0.70 |
+| Maks. kayma | göz genişliği × 0.45 |
+| Maske feather | göz genişliği × 0.22 |
+| Maske dilate | göz genişliği × 0.20 |
+
+Metal shader'ı kaldırıldı; artık tüm görüntü işleme Core Image ve ONNX üzerinden.
+
 
 ---
 
 ## Bilinen kod problemleri
 
 Aşağıdakiler **kodda doğrulanmış** gözlemlerdir; tahmin değildir.
+
+> **Not:** P1 ve P2'nin çözümleri o günkü Metal tabanlı warp'a aitti. Metal yolu daha
+> sonra tamamen kaldırıldı (EXP-005 → rijit taşıma, EXP-008 → DeepWarp modeli); kayıtlar
+> hatanın *nasıl* bulunduğunu belgelemek için duruyor.
 
 ### ~~P1 — `maxPixelShift` Metal yolunda hiç uygulanmıyor~~ ✅ ÇÖZÜLDÜ (2026-09-01)
 Eski kodda `dispX`/`dispY` hesaplanıp 20 piksele clamp ediliyor ama Metal yoluna
@@ -365,7 +392,10 @@ Mevcut Metal Gaussian warp'ı ile karşılaştırılmalı — Gaussian yaklaşı
 ve daha yumuşak, parçalı affine daha kontrollü. MVP 4'te ikisi de denenip
 `.ai/EXPERIMENTS.md`'ye kaydedilecek.
 
-## 2.8 Öğrenilmiş warp — DeepWarp (MVP 7)
+## 2.8 Öğrenilmiş warp — DeepWarp ✅ **implement edildi**
+
+> Bu bölüm modelin tam tanımıdır. Swift implementasyonu: `Core/DeepWarpModel.swift`.
+> TF1 → ONNX dönüşümü EXP-007'de sayısal olarak doğrulandı (fark ~2–3×10⁻⁵).
 
 Kaynak: `reference/deepwarp-cam/tf_models/gaze_corrector_v1/gaze_warp_model.py`
 
@@ -413,8 +443,12 @@ nasıl göründüğünü öğrenmiştir. Kalite farkı burada.
 Ağ çok küçüktür (en geniş katman 64 kanal, 48×64 girdi) — telefonda bile gerçek zamanlı
 çalışır. ONNX'e çevrilip CoreML / TFLite / ONNX Runtime ile beş platformda kullanılabilir.
 
-⚠️ **Ağırlıklar elimizde yok.** `reference/deepwarp-cam` yalnızca mimariyi içerir.
-MVP 7'nin ilk işi ağırlıkları bulmak ya da eğitmektir.
+✅ **Ağırlıklar elimizde.** Orijinal projenin GitHub Releases sayfasından indirildi
+(`v0.1.1`, `weights.zip`, 5.9 MB) → `models/deepwarp/weights/warping_model/flx/12/{L,R}`.
+ONNX'e çevrilmiş halleri `apps/macos/EyesOn/deepwarp_{L,R}.onnx` (~1.05 MB / göz).
+
+Dönüşüm betiği: `scratchpad/convert_deepwarp.py`. Model güncellenirse aynı sayısal
+karşılaştırma tekrar çalıştırılmalıdır.
 
 ---
 

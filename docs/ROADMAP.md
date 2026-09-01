@@ -46,7 +46,7 @@ hatırlanır; kamera çıkarılıp takıldığında uygulama çökmez.
 - [x] `apps/macos/EyesOn.xcodeproj`'i Xcode'da aç, derle, çalıştır — taşımanın bozmadığını doğrula ✅ 2026-09-01: BUILD SUCCEEDED, uyarı yok
 - [ ] "⚡ Düzeltme"yi aç, düzeltmenin gerçekte ne yaptığını gözlemle ve kaydet →
       `.ai/EXPERIMENTS.md` EXP-001 (baseline)
-- [ ] Konsolda `[EyeWarpKernel]` çıktısını kontrol et — Metal kernel yükleniyor mu
+- [x] ~~Konsolda `[EyeWarpKernel]` çıktısını kontrol et~~ — Metal kernel kaldırıldı (EXP-005). Karşılığı: `[ONNXFaceLandmarker] ✅` ve `[DeepWarpModel] ✅` satırları
 - [ ] Aynalama ve "Sol/Sağ" etiketlerinin doğruluğunu gözle doğrula (P6)
 - [ ] `os_signpost` ekle, Instruments ile aşama başına gecikmeyi ölç → `PERFORMANCE.md`
 
